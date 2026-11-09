@@ -1,22 +1,42 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 import ViewportHost from './components/ViewportHost.vue';
 import AboutDialog from './components/AboutDialog.vue';
+import Outliner from './components/Outliner.vue';
+import ObjectPanel from './components/ObjectPanel.vue';
+import UnitsDialog from './components/UnitsDialog.vue';
+import Toasts from './components/Toasts.vue';
 import { useUiStore } from './stores/ui';
+import { useSceneStore } from './stores/scene';
 import { NAV_PRESETS, type NavPreset } from '@/engine/navigation';
 import { getViewport } from './engine';
 
 const ui = useUiStore();
+const scene = useSceneStore();
 const presets = Object.entries(NAV_PRESETS) as [NavPreset, { label: string; hint: string }][];
 const hint = computed(() => NAV_PRESETS[ui.navPreset].hint);
+
+function onKey(e: KeyboardEvent) {
+  const t = e.target as HTMLElement;
+  if (t.closest('input, select, textarea, dialog[open]')) return;
+  if (e.key === 'Delete' && scene.selectedId) scene.remove(scene.selectedId);
+  else if (e.key === 'Escape') scene.select(null);
+  else if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) getViewport()?.frame();
+  else if (e.key === 'i' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    void scene.openImportDialog();
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKey));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 </script>
 
 <template>
   <div class="shell">
     <header class="toolbar">
       <strong class="brand">PrintPainter</strong>
-      <button class="btn" disabled title="Importers arrive in the next step of M1">Import…</button>
-      <button class="btn" @click="getViewport()?.frame()" title="Fit view">Fit view</button>
+      <button class="btn" title="Import models (Ctrl+I)" :disabled="!!scene.busy" @click="scene.openImportDialog()">Import…</button>
+      <button class="btn" title="Fit view (F)" @click="getViewport()?.frame()">Fit view</button>
       <span class="spacer" />
       <button v-if="ui.updateAvailable" class="btn btn-accent" @click="ui.update()">Update available: reload</button>
       <label class="field">
@@ -29,32 +49,38 @@ const hint = computed(() => NAV_PRESETS[ui.navPreset].hint);
     </header>
 
     <aside class="panel outliner">
-      <h3>Objects</h3>
-      <p class="muted">No objects yet. Import a model to start.</p>
+      <Outliner />
     </aside>
 
     <main class="stage">
       <ViewportHost />
     </main>
 
+    <aside class="panel props">
+      <ObjectPanel />
+    </aside>
+
     <footer class="status">
       <span>Units: mm</span>
+      <span>{{ scene.items.length }} object{{ scene.items.length === 1 ? '' : 's' }}</span>
       <span class="muted">{{ hint }}</span>
     </footer>
 
     <AboutDialog />
+    <UnitsDialog />
+    <Toasts />
   </div>
 </template>
 
 <style scoped>
 .shell {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 240px 1fr 280px;
   grid-template-rows: auto 1fr auto;
   grid-template-areas:
-    'toolbar toolbar'
-    'outliner stage'
-    'status status';
+    'toolbar toolbar toolbar'
+    'outliner stage props'
+    'status status status';
   height: 100dvh;
 }
 .toolbar {
@@ -84,6 +110,10 @@ const hint = computed(() => NAV_PRESETS[ui.navPreset].hint);
   grid-area: outliner;
   border-right: 1px solid var(--border);
 }
+.props {
+  grid-area: props;
+  border-left: 1px solid var(--border);
+}
 .stage {
   grid-area: stage;
   min-width: 0;
@@ -102,28 +132,35 @@ const hint = computed(() => NAV_PRESETS[ui.navPreset].hint);
   background: var(--panel);
   padding: 0.75rem;
   overflow: auto;
-}
-.panel h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+  min-height: 0;
 }
 .muted {
   color: var(--muted);
 }
 
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 200px 1fr;
+    grid-template-rows: auto 1fr auto auto;
+    grid-template-areas: 'toolbar toolbar' 'outliner stage' 'props props' 'status status';
+  }
+  .props {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    max-height: 35dvh;
+  }
+}
+
 @media (max-width: 700px) {
   .shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto auto;
-    grid-template-areas: 'toolbar' 'stage' 'outliner' 'status';
+    grid-template-rows: auto 1fr auto auto auto;
+    grid-template-areas: 'toolbar' 'stage' 'outliner' 'props' 'status';
   }
   .outliner {
     border-right: none;
     border-top: 1px solid var(--border);
-    max-height: 30dvh;
+    max-height: 25dvh;
   }
   .toolbar {
     flex-wrap: wrap;

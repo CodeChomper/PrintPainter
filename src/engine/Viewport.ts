@@ -1,8 +1,10 @@
 import {
   Box3,
+  BufferAttribute,
   BufferGeometry,
   Color,
   DirectionalLight,
+  DoubleSide,
   Float32BufferAttribute,
   Group,
   HemisphereLight,
@@ -10,15 +12,24 @@ import {
   LineSegments,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  Raycaster,
   Scene,
   Sphere,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
+import type { IndexedMesh } from '@/core/mesh';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { applyNavPreset, type NavPreset } from './navigation';
+
+const OBJECT_COLOR = new Color('#c9ccd3');
+const SELECTED_COLOR = new Color('#e9c46a');
+const OPEN_EDGE_COLOR = '#ff4d4d';
+const NON_MANIFOLD_COLOR = '#ffa53d';
 
 /** Scene units are millimetres, Z up (like the slicers). The plate is centred on the origin. */
 export class Viewport {
@@ -34,6 +45,13 @@ export class Viewport {
   private renderQueued = false;
   private disposeNav: () => void = () => {};
   private resizeObserver: ResizeObserver;
+  private meshes = new Map<string, Mesh>();
+  private selectedId: string | null = null;
+  private edgesVisible = true;
+  private raycaster = new Raycaster();
+
+  /** Called when the user clicks (without dragging) on an object, or on empty space (null). */
+  onPick: ((id: string | null) => void) | null = null;
 
   constructor(private host: HTMLElement) {
     this.renderer = new WebGLRenderer({ antialias: true });
@@ -57,6 +75,8 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.addEventListener('change', () => this.requestRender());
 
+    this.installClickPicking();
+
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
@@ -66,6 +86,114 @@ export class Viewport {
   setNavPreset(preset: NavPreset): void {
     this.disposeNav();
     this.disposeNav = applyNavPreset(this.controls, preset);
+  }
+
+  // --- Objects -------------------------------------------------------------
+
+  /**
+   * Adds an object. Geometry stays in source units and shares the mesh's arrays
+   * (no copy); position it with setObjectTransform.
+   */
+  addObject(id: string, mesh: IndexedMesh, openEdges: Uint32Array, nonManifoldEdges: Uint32Array): void {
+    this.removeObject(id);
+    const geom = new BufferGeometry();
+    const pos = new BufferAttribute(mesh.positions, 3);
+    geom.setAttribute('position', pos);
+    geom.setIndex(new BufferAttribute(mesh.indices, 1));
+    geom.computeBoundingSphere();
+    const mat = new MeshStandardMaterial({
+      color: OBJECT_COLOR,
+      flatShading: true,
+      roughness: 0.8,
+      metalness: 0,
+      side: DoubleSide, // open meshes stay visible from inside
+      polygonOffset: true, // keeps edge highlights on top of their faces
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+    const obj = new Mesh(geom, mat);
+    obj.userData.id = id;
+
+    const edgeLines = (pairs: Uint32Array, color: string) => {
+      const g = new BufferGeometry();
+      g.setAttribute('position', pos);
+      g.setIndex(new BufferAttribute(pairs, 1));
+      const l = new LineSegments(g, new LineBasicMaterial({ color }));
+      l.userData.edgeHighlight = true;
+      l.visible = this.edgesVisible;
+      return l;
+    };
+    if (openEdges.length) obj.add(edgeLines(openEdges, OPEN_EDGE_COLOR));
+    if (nonManifoldEdges.length) obj.add(edgeLines(nonManifoldEdges, NON_MANIFOLD_COLOR));
+
+    this.meshes.set(id, obj);
+    this.objects.add(obj);
+    this.requestRender();
+  }
+
+  /** World = source × scale + offset (mm). */
+  setObjectTransform(id: string, scale: number, offset: readonly [number, number, number]): void {
+    const obj = this.meshes.get(id);
+    if (!obj) return;
+    obj.scale.setScalar(scale);
+    obj.position.set(offset[0], offset[1], offset[2]);
+    obj.updateMatrixWorld(true);
+    this.requestRender();
+  }
+
+  removeObject(id: string): void {
+    const obj = this.meshes.get(id);
+    if (!obj) return;
+    this.objects.remove(obj);
+    obj.traverse((o) => {
+      if (o instanceof Mesh || o instanceof LineSegments) {
+        o.geometry.dispose();
+        (o.material as MeshStandardMaterial | LineBasicMaterial).dispose();
+      }
+    });
+    this.meshes.delete(id);
+    if (this.selectedId === id) this.selectedId = null;
+    this.requestRender();
+  }
+
+  setSelected(id: string | null): void {
+    this.selectedId = id;
+    for (const [oid, obj] of this.meshes) {
+      (obj.material as MeshStandardMaterial).color.copy(oid === id ? SELECTED_COLOR : OBJECT_COLOR);
+    }
+    this.requestRender();
+  }
+
+  setEdgeHighlightsVisible(visible: boolean): void {
+    this.edgesVisible = visible;
+    this.objects.traverse((o) => {
+      if (o.userData.edgeHighlight) o.visible = visible;
+    });
+    this.requestRender();
+  }
+
+  /** Returns the id of the object under the given client coordinates, or null. */
+  pick(clientX: number, clientY: number): string | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObjects([...this.meshes.values()], false)[0];
+    return (hit?.object.userData.id as string | undefined) ?? null;
+  }
+
+  private installClickPicking(): void {
+    const el = this.renderer.domElement;
+    let down: { x: number; y: number; t: number } | null = null;
+    el.addEventListener('pointerdown', (e) => {
+      down = e.button === 0 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!down || e.button !== 0) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      const quick = performance.now() - down.t < 500;
+      down = null;
+      if (moved < 4 && quick) this.onPick?.(this.pick(e.clientX, e.clientY));
+    });
   }
 
   setPlateSize(w: number, d: number): void {

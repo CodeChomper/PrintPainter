@@ -8,6 +8,7 @@
   --muted: #9298a5;
   --accent: #3fb68b;
   --danger: #ff6b6b;
+  --warning: #f2b84b;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
 }

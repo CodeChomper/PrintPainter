@@ -4,6 +4,13 @@ import { NAV_PRESETS, type NavPreset } from '@/engine/navigation';
 
 const NAV_KEY = 'pp.navPreset';
 
+export type NoticeKind = 'info' | 'warning' | 'error';
+export interface Notice {
+  id: number;
+  kind: NoticeKind;
+  text: string;
+}
+
 function loadNavPreset(): NavPreset {
   try {
     const v = localStorage.getItem(NAV_KEY);
@@ -20,6 +27,19 @@ export const useUiStore = defineStore('ui', () => {
   const aboutOpen = ref(false);
   const updateAvailable = ref(false);
   let applyUpdate: (() => void) | null = null;
+  const notices = ref<Notice[]>([]);
+  let noticeId = 0;
+
+  function dismiss(id: number) {
+    notices.value = notices.value.filter((n) => n.id !== id);
+  }
+
+  /** Shows a toast. Info and warnings fade on their own; errors stay until dismissed. */
+  function notify(kind: NoticeKind, text: string) {
+    const id = ++noticeId;
+    notices.value.push({ id, kind, text });
+    if (kind !== 'error') setTimeout(() => dismiss(id), kind === 'warning' ? 10000 : 5000);
+  }
 
   watch(navPreset, (v) => {
     try {
@@ -39,6 +59,9 @@ export const useUiStore = defineStore('ui', () => {
     aboutOpen,
     updateAvailable,
     setUpdateHandler,
+    notices,
+    notify,
+    dismiss,
     update: () => applyUpdate?.(),
   };
 });

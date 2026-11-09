@@ -18,6 +18,8 @@
     "spike:3mf": "node spikes/m0-3mf/build.mjs"
   },
   "dependencies": {
+    "comlink": "4.4.2",
+    "fflate": "0.8.3",
     "pinia": "4.1.0",
     "three": "0.186.1",
     "vue": "3.5.44"
@@ -27,6 +29,7 @@
     "@types/three": "0.186.0",
     "@vitejs/plugin-vue": "6.0.10",
     "@vue/tsconfig": "0.9.1",
+    "happy-dom": "21.0.4",
     "typescript": "6.0.3",
     "vite": "8.3.5",
     "vite-plugin-pwa": "2.0.0",
