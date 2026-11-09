@@ -1,0 +1,36 @@
+{
+  "name": "printpainter",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Substance-style painter for multi-material 3D printing. Paint filaments on meshes and STEP files, export slice-ready 3MF.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "spike:3mf": "node spikes/m0-3mf/build.mjs"
+  },
+  "dependencies": {
+    "pinia": "4.1.0",
+    "three": "0.186.1",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/tsconfig": "0.9.1",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vite-plugin-pwa": "2.0.0",
+    "vitest": "5.0.5",
+    "vue-tsc": "3.3.13"
+  }
+}
