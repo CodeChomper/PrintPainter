@@ -13,6 +13,8 @@ export interface SceneObject {
   name: string;
   fileName: string;
   format: ImportFormat;
+  /** Objects imported from the same file share this, and change units together. */
+  importId: string;
   /** Cleaned mesh in source units. */
   mesh: IndexedMesh;
   report: CleanupReport;

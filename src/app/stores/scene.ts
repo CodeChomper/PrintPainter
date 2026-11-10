@@ -2,8 +2,18 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { boundsSize, boundsUnion, meshBounds, type Bounds } from '@/core/mesh';
 import { findFreeSpot, type Rect } from '@/core/placement';
-import { UNIT_TO_MM, type LengthUnit, type UnitGuess } from '@/core/units';
-import { IMPORT_EXTENSIONS, ImportError, importFile, type ImportFormat } from '@/io/import';
+import { formatDims, UNIT_TO_MM, type LengthUnit, type UnitGuess } from '@/core/units';
+import {
+  formatFromName,
+  IMPORT_EXTENSIONS,
+  ImportError,
+  importFile,
+  releaseStepWorker,
+  STEP_QUALITY,
+  type ImportFormat,
+  type ImportOptions,
+  type StepQuality,
+} from '@/io/import';
 import { platform } from '@/platform';
 import { sceneObjects, type SceneObject } from '../document';
 import { getViewport } from '../engine';
@@ -28,6 +38,10 @@ export interface ObjectSummary {
   removedDuplicate: number;
   flippedTriangles: number;
   components: number;
+  /** Number of STEP B-rep faces, or null for mesh formats. */
+  cadFaces: number | null;
+  /** How many objects came from the same import (including this one). */
+  siblings: number;
 }
 
 export interface UnitQuestion {
@@ -35,6 +49,25 @@ export interface UnitQuestion {
   /** X, Y, Z size in file units. */
   size: [number, number, number];
   guess: UnitGuess;
+}
+
+const STEP_KEY = 'pp.stepQuality';
+
+function loadStepQuality(): StepQuality {
+  try {
+    const v = localStorage.getItem(STEP_KEY);
+    if (v && v in STEP_QUALITY) return v as StepQuality;
+  } catch {
+    /* storage unavailable */
+  }
+  return 'normal';
+}
+
+function countFaces(ids: Int32Array | undefined): number | null {
+  if (!ids) return null;
+  const s = new Set<number>();
+  for (const id of ids) if (id >= 0) s.add(id);
+  return s.size;
 }
 
 // Matches the viewport's default plate. Printer/plate selection comes later.
@@ -49,6 +82,10 @@ function footprint(o: SceneObject): Rect {
     minY: b.min[1] * s + o.offset[1],
     maxY: b.max[1] * s + o.offset[1],
   };
+}
+
+function siblingsOf(o: SceneObject): SceneObject[] {
+  return [...sceneObjects.values()].filter((x) => x.importId === o.importId);
 }
 
 function summarize(o: SceneObject): ObjectSummary {
@@ -72,6 +109,8 @@ function summarize(o: SceneObject): ObjectSummary {
     removedDuplicate: r.removedDuplicate,
     flippedTriangles: r.flippedTriangles,
     components: r.components,
+    cadFaces: countFaces(o.mesh.faceIds),
+    siblings: siblingsOf(o).length,
   };
 }
 
@@ -83,6 +122,10 @@ export const useSceneStore = defineStore('scene', () => {
   const showEdges = ref(true);
   const unitQuestion = ref<UnitQuestion | null>(null);
   let answerUnit: ((u: LengthUnit | null) => void) | null = null;
+  /** STEP file names waiting for a quality choice, or null. */
+  const stepQuestion = ref<string[] | null>(null);
+  const stepQuality = ref<StepQuality>(loadStepQuality());
+  let answerStep: ((q: StepQuality | null) => void) | null = null;
 
   const selected = computed(() => items.value.find((i) => i.id === selectedId.value) ?? null);
 
@@ -97,6 +140,25 @@ export const useSceneStore = defineStore('scene', () => {
     answerUnit = null;
   }
 
+  function askStepQuality(fileNames: string[]): Promise<StepQuality | null> {
+    stepQuestion.value = fileNames;
+    return new Promise((resolve) => (answerStep = resolve));
+  }
+
+  function answerStepQuestion(q: StepQuality | null) {
+    stepQuestion.value = null;
+    if (q) {
+      stepQuality.value = q;
+      try {
+        localStorage.setItem(STEP_KEY, q);
+      } catch {
+        /* ignore */
+      }
+    }
+    answerStep?.(q);
+    answerStep = null;
+  }
+
   async function openImportDialog() {
     const files = await platform.openFiles({
       description: '3D models',
@@ -107,22 +169,34 @@ export const useSceneStore = defineStore('scene', () => {
   }
 
   async function importFiles(files: File[]) {
-    for (const file of files) {
-      busy.value = `Importing ${file.name}…`;
-      try {
-        await importOne(file);
-      } catch (e) {
-        const msg = e instanceof ImportError ? e.message : `${file.name}: ${(e as Error).message ?? e}`;
-        ui.notify('error', msg);
-        if (!(e instanceof ImportError)) console.error(e);
-      } finally {
-        busy.value = null;
+    // Ask once per batch for STEP tessellation quality.
+    const steps = files.filter((f) => formatFromName(f.name) === 'step');
+    let options: ImportOptions = {};
+    if (steps.length) {
+      const q = await askStepQuality(steps.map((f) => f.name));
+      if (!q) files = files.filter((f) => !steps.includes(f));
+      options = { stepQuality: q ?? undefined };
+    }
+    try {
+      for (const file of files) {
+        busy.value = formatFromName(file.name) === 'step' ? `Tessellating ${file.name}…` : `Importing ${file.name}…`;
+        try {
+          await importOne(file, options);
+        } catch (e) {
+          const msg = e instanceof ImportError ? e.message : `${file.name}: ${(e as Error).message ?? e}`;
+          ui.notify('error', msg);
+          if (!(e instanceof ImportError)) console.error(e);
+        } finally {
+          busy.value = null;
+        }
       }
+    } finally {
+      if (steps.length) releaseStepWorker();
     }
   }
 
-  async function importOne(file: File) {
-    const result = await importFile(file);
+  async function importOne(file: File, options: ImportOptions) {
+    const result = await importFile(file, options);
     result.warnings.forEach((w) => ui.notify('warning', `${file.name}: ${w}`));
 
     let unit = result.unit.unit;
@@ -153,6 +227,10 @@ export const useSceneStore = defineStore('scene', () => {
       [...sceneObjects.values()].map(footprint),
       PLATE,
     );
+    const importSize = boundsSize(all).map((v) => v * scale);
+    if (importSize[0]! > PLATE.w || importSize[1]! > PLATE.d) {
+      ui.notify('warning', `${file.name} is ${formatDims(importSize)}, bigger than the ${PLATE.w} × ${PLATE.d} mm plate. If that's wrong, change its units in Properties.`);
+    }
     const offset: [number, number, number] = [
       cx - ((all.min[0] + all.max[0]) / 2) * scale,
       cy - ((all.min[1] + all.max[1]) / 2) * scale,
@@ -160,6 +238,7 @@ export const useSceneStore = defineStore('scene', () => {
     ];
 
     const vp = getViewport();
+    const importId = crypto.randomUUID();
     let lastId = '';
     for (const c of cleaned) {
       const obj: SceneObject = {
@@ -167,6 +246,7 @@ export const useSceneStore = defineStore('scene', () => {
         name: c.name,
         fileName: file.name,
         format: result.format,
+        importId,
         mesh: c.mesh,
         report: c.report,
         unit,
@@ -189,6 +269,7 @@ export const useSceneStore = defineStore('scene', () => {
         ui.notify('warning', `${s.name} isn't watertight: ${bits.join(', ')}. PrintPainter doesn't repair meshes; the slicer may.`);
       }
     }
+    refreshSummaries(importId);
     vp?.setEdgeHighlightsVisible(showEdges.value);
     select(lastId);
     vp?.frame();
@@ -199,26 +280,52 @@ export const useSceneStore = defineStore('scene', () => {
     getViewport()?.setSelected(id);
   }
 
+  /** Re-summarizes every object from one import (sibling counts, units, sizes). */
+  function refreshSummaries(importId: string) {
+    items.value = items.value.map((it) => {
+      const o = sceneObjects.get(it.id);
+      return o && o.importId === importId ? summarize(o) : it;
+    });
+  }
+
   function remove(id: string) {
+    const o = sceneObjects.get(id);
     sceneObjects.delete(id);
     getViewport()?.removeObject(id);
     items.value = items.value.filter((i) => i.id !== id);
+    if (o) refreshSummaries(o.importId);
     if (selectedId.value === id) select(null);
   }
 
-  /** Changes an object's source unit, keeping its bottom centre where it is on the plate. */
+  /**
+   * Changes the source unit of every object from the same import (a file has one unit).
+   * They scale together around the group's bottom centre, so assemblies stay assembled
+   * and the group stays where it was on the plate.
+   */
   function setUnit(id: string, unit: LengthUnit) {
     const o = sceneObjects.get(id);
     if (!o || o.unit === unit) return;
-    const b = o.srcBounds;
-    const bc = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, b.min[2]] as const;
-    const oldS = UNIT_TO_MM[o.unit];
-    const newS = UNIT_TO_MM[unit];
-    o.offset = [0, 1, 2].map((k) => bc[k]! * oldS + o.offset[k]! - bc[k]! * newS) as [number, number, number];
-    o.unit = unit;
-    getViewport()?.setObjectTransform(id, newS, o.offset);
-    const i = items.value.findIndex((x) => x.id === id);
-    if (i >= 0) items.value[i] = summarize(o);
+    const group = siblingsOf(o);
+    const world = group
+      .map((g) => {
+        const s = UNIT_TO_MM[g.unit];
+        const b = g.srcBounds;
+        return {
+          min: [0, 1, 2].map((k) => b.min[k]! * s + g.offset[k]!),
+          max: [0, 1, 2].map((k) => b.max[k]! * s + g.offset[k]!),
+        } as Bounds;
+      })
+      .reduce((a, b) => boundsUnion(a, b));
+    const pivot = [(world.min[0] + world.max[0]) / 2, (world.min[1] + world.max[1]) / 2, world.min[2]];
+    const vp = getViewport();
+    for (const g of group) {
+      const ratio = UNIT_TO_MM[unit] / UNIT_TO_MM[g.unit];
+      g.offset = [0, 1, 2].map((k) => pivot[k]! + (g.offset[k]! - pivot[k]!) * ratio) as [number, number, number];
+      g.unit = unit;
+      vp?.setObjectTransform(g.id, UNIT_TO_MM[unit], g.offset);
+    }
+    refreshSummaries(o.importId);
+    vp?.frame(); // the size may have changed a lot
   }
 
   /** Rebuilds the viewport's objects from the scene document (after the viewport is recreated). */
@@ -247,6 +354,9 @@ export const useSceneStore = defineStore('scene', () => {
     showEdges,
     unitQuestion,
     answerUnitQuestion,
+    stepQuestion,
+    stepQuality,
+    answerStepQuestion,
     openImportDialog,
     importFiles,
     select,

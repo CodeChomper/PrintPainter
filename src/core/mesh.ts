@@ -2,6 +2,8 @@
 export interface IndexedMesh {
   positions: Float32Array;
   indices: Uint32Array;
+  /** Optional per-triangle source face ID (STEP B-rep face), kept through cleanup. */
+  faceIds?: Int32Array;
 }
 
 export interface Bounds {

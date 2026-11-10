@@ -141,3 +141,15 @@ describe('meshBounds', () => {
     expect(b.max).toEqual([1, 2, 3]);
   });
 });
+
+describe('cleanupMesh face IDs', () => {
+  it('keeps per-triangle face IDs aligned after removing triangles', () => {
+    const tris = [CUBE_TRIS[0]!, [0, 0, 1], ...CUBE_TRIS.slice(1), CUBE_TRIS[3]!];
+    const faceIds = Int32Array.from(tris, (_t, i) => (i === 1 ? 99 : i === tris.length - 1 ? 98 : i * 10));
+    const { mesh, report } = cleanupMesh({ ...fromSoup(soup(tris)), faceIds });
+    expect(report.outputTriangles).toBe(12);
+    expect(mesh.faceIds).toBeDefined();
+    // The degenerate (99) and duplicate (98) triangles are gone; the rest keep their IDs in order.
+    expect(Array.from(mesh.faceIds!)).toEqual([0, ...Array.from({ length: 11 }, (_x, i) => (i + 2) * 10)]);
+  });
+});

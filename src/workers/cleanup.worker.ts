@@ -2,9 +2,10 @@ import { expose, transfer } from 'comlink';
 import { cleanupMesh, type CleanupResult } from '@/core/cleanup';
 
 const api = {
-  cleanup(positions: Float32Array, indices: Uint32Array): CleanupResult {
-    const r = cleanupMesh({ positions, indices });
+  cleanup(positions: Float32Array, indices: Uint32Array, faceIds?: Int32Array): CleanupResult {
+    const r = cleanupMesh({ positions, indices, faceIds });
     return transfer(r, [
+      ...(r.mesh.faceIds ? [r.mesh.faceIds.buffer as ArrayBuffer] : []),
       r.mesh.positions.buffer as ArrayBuffer,
       r.mesh.indices.buffer as ArrayBuffer,
       r.report.openEdges.buffer as ArrayBuffer,

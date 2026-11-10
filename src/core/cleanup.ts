@@ -46,6 +46,11 @@ export function cleanupMesh(input: IndexedMesh): CleanupResult {
   const indices = filtered.indices;
   const oriented = orientTriangles(welded.mesh.positions, indices, vCount);
   const mesh = compactVertices({ positions: welded.mesh.positions, indices });
+  if (input.faceIds) {
+    // Orientation and compaction keep triangle order, so only the filter step remaps triangles.
+    const src = input.faceIds;
+    mesh.faceIds = Int32Array.from(filtered.kept, (t) => src[t]!);
+  }
   const edges = analyzeEdges(mesh.indices, mesh.positions.length / 3);
 
   const pairs = (halfEdges: number[]) => {
@@ -154,6 +159,8 @@ export function weldVertices(mesh: IndexedMesh, eps: number): { mesh: IndexedMes
 
 export function removeDegenerateAndDuplicates(mesh: IndexedMesh): {
   indices: Uint32Array;
+  /** For each kept triangle, its index in the input. */
+  kept: Uint32Array;
   degenerate: number;
   duplicates: number;
 } {
@@ -161,6 +168,7 @@ export function removeDegenerateAndDuplicates(mesh: IndexedMesh): {
   const p = mesh.positions;
   const T = src.length / 3;
   const keep = new Uint32Array(src.length);
+  const keptFrom = new Uint32Array(T);
   let kept = 0;
   let degenerate = 0;
   let duplicates = 0;
@@ -196,9 +204,10 @@ export function removeDegenerateAndDuplicates(mesh: IndexedMesh): {
     keep[kept * 3] = a;
     keep[kept * 3 + 1] = b;
     keep[kept * 3 + 2] = c;
+    keptFrom[kept] = t;
     kept++;
   }
-  return { indices: keep.slice(0, kept * 3), degenerate, duplicates };
+  return { indices: keep.slice(0, kept * 3), kept: keptFrom.slice(0, kept), degenerate, duplicates };
 }
 
 // ---------------------------------------------------------------------------

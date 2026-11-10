@@ -5,6 +5,7 @@ import AboutDialog from './components/AboutDialog.vue';
 import Outliner from './components/Outliner.vue';
 import ObjectPanel from './components/ObjectPanel.vue';
 import UnitsDialog from './components/UnitsDialog.vue';
+import StepDialog from './components/StepDialog.vue';
 import Toasts from './components/Toasts.vue';
 import { useUiStore } from './stores/ui';
 import { useSceneStore } from './stores/scene';
@@ -68,6 +69,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
     <AboutDialog />
     <UnitsDialog />
+    <StepDialog />
     <Toasts />
   </div>
 </template>

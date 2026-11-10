@@ -8,7 +8,7 @@ const scene = useSceneStore();
   <section class="outliner" aria-label="Objects">
     <h3>Objects</h3>
     <p v-if="!scene.items.length" class="muted">
-      No objects yet. Use <strong>Import…</strong> or drop STL, OBJ, 3MF, glTF, PLY or FBX files on the view.
+      No objects yet. Use <strong>Import…</strong> or drop STL, OBJ, 3MF, STEP, glTF, PLY or FBX files on the view.
     </p>
     <ul v-else role="listbox" aria-label="Scene objects">
       <li

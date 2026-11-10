@@ -34,6 +34,8 @@ const cleanupLines = computed(() => {
         <dd>{{ formatDims(o.dims) }}</dd>
         <dt>Triangles</dt>
         <dd>{{ o.triangles.toLocaleString() }}</dd>
+        <dt v-if="o.cadFaces !== null">CAD faces</dt>
+        <dd v-if="o.cadFaces !== null">{{ o.cadFaces.toLocaleString() }}</dd>
         <dt v-if="o.components > 1">Pieces</dt>
         <dd v-if="o.components > 1">{{ o.components }}</dd>
       </dl>
@@ -44,6 +46,7 @@ const cleanupLines = computed(() => {
           <option v-for="[id, label] in units" :key="id" :value="id">{{ label }}</option>
         </select>
       </label>
+      <p v-if="o.siblings > 1" class="hint">Applies to all {{ o.siblings }} objects from this file.</p>
 
       <h4>Mesh check</h4>
       <p v-if="o.watertight" class="ok">Watertight</p>
@@ -106,6 +109,11 @@ dd {
 }
 .field span {
   color: var(--muted);
+}
+.hint {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 .ok {
   color: var(--accent);

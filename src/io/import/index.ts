@@ -2,11 +2,19 @@ import { Mesh } from 'three';
 import { boundsSize, boundsUnion, meshBounds, type Bounds } from '@/core/mesh';
 import { guessUnitFromExtent, type UnitGuess } from '@/core/units';
 import { partsFromObject3D } from './fromThree';
+import type { StepQuality } from './step';
 import { read3mf } from './threemf';
 import { ImportError, type ImportFormat, type ImportResult, type ImportedPart } from './types';
 
 export { ImportError } from './types';
 export type { ImportResult, ImportedPart, ImportFormat } from './types';
+export { STEP_QUALITY, STEP_QUALITY_ORDER, type StepQuality } from './step';
+export { releaseStepWorker } from './stepWorker';
+
+export interface ImportOptions {
+  /** Tessellation quality for STEP files. */
+  stepQuality?: StepQuality;
+}
 
 const EXT_FORMAT: Record<string, ImportFormat> = {
   stl: 'stl',
@@ -30,7 +38,7 @@ export function formatFromName(name: string): ImportFormat | null {
 const baseName = (name: string) => name.replace(/\.[^.]+$/, '');
 
 /** Parses a model file into parts (file units) plus a unit decision. Loaders are loaded on demand. */
-export async function importFile(file: File): Promise<ImportResult> {
+export async function importFile(file: File, options: ImportOptions = {}): Promise<ImportResult> {
   const format = formatFromName(file.name);
   if (!format) throw new ImportError(`${file.name}: unsupported file type.`);
   const name = baseName(file.name);
@@ -92,8 +100,16 @@ export async function importFile(file: File): Promise<ImportResult> {
       unit = { unit: r.unit, certain: true, reason: 'The 3MF file states its unit.' };
       break;
     }
-    case 'step':
-      throw new ImportError('STEP import is coming in the next step of M1.');
+    case 'step': {
+      const { readStepInWorker } = await import('./stepWorker');
+      try {
+        parts = await readStepInWorker(new Uint8Array(await file.arrayBuffer()), options.stepQuality ?? 'normal', name);
+      } catch (e) {
+        throw new ImportError(`${file.name}: ${(e as Error).message || 'could not read STEP file'}`);
+      }
+      unit = { unit: 'mm', certain: true, reason: 'STEP files state their units (converted to mm).' };
+      break;
+    }
   }
 
   if (!parts.length) throw new ImportError(`${file.name} contains no triangle meshes.`);

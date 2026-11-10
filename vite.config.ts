@@ -28,7 +28,11 @@ export default defineConfig({
         display: 'standalone',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,wasm}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,wasm,txt}'],
+        // occt-import-js.wasm is ~7.6 MB; precache it so STEP import works offline.
+        maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
+      },
     }),
   ],
   resolve: {

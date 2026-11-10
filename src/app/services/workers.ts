@@ -13,5 +13,6 @@ export function cleanupInWorker(mesh: IndexedMesh): Promise<CleanupResult> {
   return cleanupWorker.cleanup(
     transfer(mesh.positions, [mesh.positions.buffer as ArrayBuffer]),
     transfer(mesh.indices, [mesh.indices.buffer as ArrayBuffer]),
+    mesh.faceIds && transfer(mesh.faceIds, [mesh.faceIds.buffer as ArrayBuffer]),
   );
 }
