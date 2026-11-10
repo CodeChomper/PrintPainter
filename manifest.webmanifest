@@ -1,0 +1,1 @@
+{"name":"PrintPainter","short_name":"PrintPainter","description":"Paint filaments on 3D models and export slice-ready 3MF files.","start_url":"/PrintPainter/","display":"standalone","background_color":"#1b1d22","theme_color":"#1b1d22","lang":"en","scope":"/PrintPainter/","icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}
