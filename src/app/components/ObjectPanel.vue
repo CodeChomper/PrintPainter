@@ -2,8 +2,10 @@
 import { computed } from 'vue';
 import { formatDims, UNIT_LABELS, type LengthUnit } from '@/core/units';
 import { useSceneStore } from '../stores/scene';
+import { usePaintStore } from '../stores/paint';
 
 const scene = useSceneStore();
+const paint = usePaintStore();
 const o = computed(() => scene.selected);
 const units = Object.entries(UNIT_LABELS) as [LengthUnit, string][];
 
@@ -66,6 +68,23 @@ const cleanupLines = computed(() => {
         <li v-for="l in cleanupLines" :key="l">{{ l }}</li>
       </ul>
 
+      <h4>Paint</h4>
+      <p v-if="o.paintState === 'preparing'" class="muted">Preparing the paint surface…</p>
+      <p v-else-if="o.paintState === 'failed'" class="warn-box">Couldn't prepare this object for painting: {{ o.paintError }}</p>
+      <template v-else>
+        <dl>
+          <dt>Detail</dt>
+          <dd>{{ o.texelMm?.toFixed(2) }} mm</dd>
+          <dt>Texture{{ o.paintPages.length === 1 ? '' : 's' }}</dt>
+          <dd>{{ o.paintPages.join(', ') }}</dd>
+        </dl>
+        <button class="btn" @click="paint.clearObject(o.id)">Clear paint</button>
+      </template>
+
+      <div class="row">
+        <button class="btn" :title="o.hidden ? 'Show' : 'Hide (H)'" @click="scene.setHidden(o.id, !o.hidden)">{{ o.hidden ? 'Show' : 'Hide' }}</button>
+        <button class="btn" title="Hide everything else (Shift+H)" @click="scene.isolate(o.id)">Isolate</button>
+      </div>
       <button class="btn danger" @click="scene.remove(o.id)">Remove object</button>
     </template>
   </section>
@@ -162,8 +181,16 @@ dd {
   color: var(--muted);
   font-size: 0.85rem;
 }
-.danger {
+.row {
+  display: flex;
+  gap: 0.4rem;
   margin-top: 1rem;
+}
+.row .btn {
+  flex: 1;
+}
+.danger {
+  margin-top: 0.5rem;
   width: 100%;
 }
 .danger:hover {

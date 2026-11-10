@@ -9,6 +9,8 @@ import { ImportError, type ImportFormat, type ImportResult, type ImportedPart } 
 export { ImportError } from './types';
 export type { ImportResult, ImportedPart, ImportFormat } from './types';
 export { STEP_QUALITY, STEP_QUALITY_ORDER, type StepQuality } from './step';
+// stepWorker is a thin wrapper; the OpenCascade code and WASM load inside the worker.
+import { readStepInWorker } from './stepWorker';
 export { releaseStepWorker } from './stepWorker';
 
 export interface ImportOptions {
@@ -101,7 +103,6 @@ export async function importFile(file: File, options: ImportOptions = {}): Promi
       break;
     }
     case 'step': {
-      const { readStepInWorker } = await import('./stepWorker');
       try {
         parts = await readStepInWorker(new Uint8Array(await file.arrayBuffer()), options.stepQuality ?? 'normal', name);
       } catch (e) {

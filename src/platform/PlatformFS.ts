@@ -9,7 +9,17 @@ export interface OpenFileOptions {
   multiple?: boolean;
 }
 
+export interface SaveFileOptions {
+  suggestedName: string;
+  description: string;
+  /** Extension without the dot. */
+  extension: string;
+  mime: string;
+}
+
 export interface PlatformFS {
   /** Resolves to the chosen files, or [] if the user cancelled. */
   openFiles(options: OpenFileOptions): Promise<File[]>;
+  /** Saves (or downloads) data. Resolves false if the user cancelled. */
+  saveFile(data: Blob, options: SaveFileOptions): Promise<boolean>;
 }

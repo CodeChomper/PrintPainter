@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import { chooseTexelMm, surfaceArea } from '@/core/atlas';
 import { boundsSize, boundsUnion, meshBounds, type Bounds } from '@/core/mesh';
+import { createMaps, resampleMaps } from '@/core/paint';
 import { findFreeSpot, type Rect } from '@/core/placement';
 import { formatDims, UNIT_TO_MM, type LengthUnit, type UnitGuess } from '@/core/units';
 import {
@@ -15,9 +17,11 @@ import {
   type StepQuality,
 } from '@/io/import';
 import { platform } from '@/platform';
-import { sceneObjects, type SceneObject } from '../document';
+import { sceneObjects, type PaintState, type SceneObject } from '../document';
 import { getViewport } from '../engine';
-import { cleanupInWorker } from '../services/workers';
+import { atlasInWorker, cleanupInWorker } from '../services/workers';
+import { usePaintStore } from './paint';
+import { usePaletteStore } from './palette';
 import { useUiStore } from './ui';
 
 export interface ObjectSummary {
@@ -42,6 +46,13 @@ export interface ObjectSummary {
   cadFaces: number | null;
   /** How many objects came from the same import (including this one). */
   siblings: number;
+  hidden: boolean;
+  paintState: PaintState;
+  paintError: string | null;
+  /** Paint texel edge in mm, once ready. */
+  texelMm: number | null;
+  /** Paint texture pages, e.g. ["2764 × 2840"]. */
+  paintPages: string[];
 }
 
 export interface UnitQuestion {
@@ -111,6 +122,11 @@ function summarize(o: SceneObject): ObjectSummary {
     components: r.components,
     cadFaces: countFaces(o.mesh.faceIds),
     siblings: siblingsOf(o).length,
+    hidden: o.hidden,
+    paintState: o.paintState,
+    paintError: o.paintError ?? null,
+    texelMm: o.paint?.texelMm ?? null,
+    paintPages: o.paint?.atlas.pages.map((p) => `${p.width} × ${p.height}`) ?? [],
   };
 }
 
@@ -252,6 +268,10 @@ export const useSceneStore = defineStore('scene', () => {
         unit,
         offset: [...offset],
         srcBounds: c.srcBounds,
+        hidden: false,
+        paint: null,
+        paintState: 'preparing',
+        paintJob: 0,
       };
       sceneObjects.set(obj.id, obj);
       vp?.addObject(obj.id, obj.mesh, obj.report.openEdges, obj.report.nonManifoldEdges);
@@ -273,6 +293,48 @@ export const useSceneStore = defineStore('scene', () => {
     vp?.setEdgeHighlightsVisible(showEdges.value);
     select(lastId);
     vp?.frame();
+    for (const o of sceneObjects.values()) if (o.importId === importId) void preparePaint(o);
+  }
+
+  /** Re-summarizes one object. */
+  function refresh(id: string) {
+    const o = sceneObjects.get(id);
+    const i = items.value.findIndex((it) => it.id === id);
+    if (o && i >= 0) items.value[i] = summarize(o);
+  }
+
+  /**
+   * Builds (or rebuilds, after a unit change) the object's paint atlas in a worker.
+   * Existing paint is carried over to the new atlas at the same surface points.
+   */
+  async function preparePaint(o: SceneObject) {
+    const job = ++o.paintJob;
+    o.paintState = 'preparing';
+    o.paintError = undefined;
+    refresh(o.id);
+    const mmPerUnit = UNIT_TO_MM[o.unit];
+    const texelMm = chooseTexelMm(surfaceArea(o.mesh) * mmPerUnit * mmPerUnit);
+    const maxPage = Math.min(8192, getViewport()?.maxTextureSize ?? 8192);
+    try {
+      const atlas = await atlasInWorker(o.mesh, texelMm / mmPerUnit, maxPage);
+      if (sceneObjects.get(o.id) !== o || o.paintJob !== job) return; // removed or superseded
+      const old = o.paint;
+      const maps = old ? resampleMaps(old.atlas, old.maps, atlas) : createMaps(atlas);
+      if (old) usePaintStore().dropHistory(o.id);
+      o.paint = { atlas, maps, texelMm };
+      o.paintState = 'ready';
+      getViewport()?.setPaintSurface(o.id, atlas, maps);
+      if (texelMm > 0.1 + 1e-9) {
+        ui.notify('info', `${o.name} has a large surface, so it paints at ${texelMm.toFixed(2)} mm detail instead of 0.10 mm.`);
+      }
+    } catch (e) {
+      if (o.paintJob !== job) return;
+      o.paintState = 'failed';
+      o.paintError = (e as Error).message ?? String(e);
+      ui.notify('error', `Couldn't prepare ${o.name} for painting: ${o.paintError}`);
+      console.error(e);
+    }
+    refresh(o.id);
   }
 
   function select(id: string | null) {
@@ -292,6 +354,7 @@ export const useSceneStore = defineStore('scene', () => {
     const o = sceneObjects.get(id);
     sceneObjects.delete(id);
     getViewport()?.removeObject(id);
+    usePaintStore().dropHistory(id);
     items.value = items.value.filter((i) => i.id !== id);
     if (o) refreshSummaries(o.importId);
     if (selectedId.value === id) select(null);
@@ -326,15 +389,38 @@ export const useSceneStore = defineStore('scene', () => {
     }
     refreshSummaries(o.importId);
     vp?.frame(); // the size may have changed a lot
+    // Paint detail is set in mm, so the atlas is rebuilt for the new size (paint is kept).
+    for (const g of group) void preparePaint(g);
+  }
+
+  function setHidden(id: string, hidden: boolean) {
+    const o = sceneObjects.get(id);
+    if (!o || o.hidden === hidden) return;
+    o.hidden = hidden;
+    getViewport()?.setHidden(id, hidden);
+    refresh(id);
+  }
+
+  /** Hides every object except this one. */
+  function isolate(id: string) {
+    for (const o of sceneObjects.values()) setHidden(o.id, o.id !== id);
+  }
+
+  function showAll() {
+    for (const o of sceneObjects.values()) setHidden(o.id, false);
   }
 
   /** Rebuilds the viewport's objects from the scene document (after the viewport is recreated). */
   function syncViewport() {
     const vp = getViewport();
     if (!vp) return;
+    vp.setPalette(usePaletteStore().colors);
+    vp.setPreview(usePaintStore().preview);
     for (const o of sceneObjects.values()) {
       vp.addObject(o.id, o.mesh, o.report.openEdges, o.report.nonManifoldEdges);
       vp.setObjectTransform(o.id, UNIT_TO_MM[o.unit], o.offset);
+      if (o.paint) vp.setPaintSurface(o.id, o.paint.atlas, o.paint.maps);
+      vp.setHidden(o.id, o.hidden);
     }
     vp.setEdgeHighlightsVisible(showEdges.value);
     vp.setSelected(selectedId.value);
@@ -363,6 +449,9 @@ export const useSceneStore = defineStore('scene', () => {
     remove,
     setUnit,
     setShowEdges,
+    setHidden,
+    isolate,
+    showAll,
     syncViewport,
   };
 });

@@ -4,16 +4,25 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One Pages deploy at a time; a newer push doesn't cancel one already deploying.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+# Actions are pinned to release commits (supply-chain precaution); the tag is in the comment.
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -23,9 +32,25 @@ jobs:
       - name: Build for GitHub Pages
         run: npm run build
         env:
-          PP_BASE: /printpainter/
-      - uses: actions/upload-artifact@v4
+          # Project Pages live at /<repo name>/. Set a PP_BASE repository variable
+          # (e.g. "/") to override it, such as for a custom domain.
+          PP_BASE: ${{ vars.PP_BASE || format('/{0}/', github.event.repository.name) }}
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          name: dist
           path: dist
-          retention-days: 7
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

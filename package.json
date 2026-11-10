@@ -23,6 +23,7 @@
     "occt-import-js": "0.0.23",
     "pinia": "4.1.0",
     "three": "0.186.1",
+    "three-mesh-bvh": "0.9.16",
     "vue": "3.5.44"
   },
   "devDependencies": {
