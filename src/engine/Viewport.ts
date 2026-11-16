@@ -26,6 +26,7 @@ import {
   Vector3,
   WebGLRenderer,
   WebGLRenderTarget,
+  WireframeGeometry,
   type Intersection,
   type Material,
 } from 'three';
@@ -38,7 +39,7 @@ import { DepthView } from './depth';
 import { applyNavPreset, type NavPreset } from './navigation';
 import { createDepthMaterial, createPaintMaterial, createPaletteUniform, createSlotTexture } from './paintMaterial';
 
-const SELECTED_EMISSIVE = new Color('#3a2c08');
+const SELECTED_EMISSIVE = new Color('#1f2b0c');
 const BLACK = new Color('#000000');
 const OPEN_EDGE_COLOR = '#ff4d4d';
 const NON_MANIFOLD_COLOR = '#ffa53d';
@@ -58,6 +59,17 @@ interface ViewObject {
   mesh: Mesh;
   edges: Group;
   paint: PaintBinding | null;
+  /** Fill preview: some paint triangles drawn over the surface (shares the paint mesh's positions). */
+  highlight: Mesh | null;
+  /** Export preview: the cut mesh in flat filament colours. */
+  cut: { group: Group; slots: Uint8Array; colors: BufferAttribute } | null;
+}
+
+/** A mesh where every triangle has one slot (the export cut). Positions in source units. */
+export interface SlotMesh {
+  positions: ArrayLike<number>;
+  indices: ArrayLike<number>;
+  slots: Uint8Array;
 }
 
 export interface PaintHit {
@@ -66,6 +78,8 @@ export interface PaintHit {
   point: Vector3;
   /** False while the object's paint surface is still being prepared. */
   ready: boolean;
+  /** Paint triangle hit (when ready). */
+  tri: number;
 }
 
 /** Scene units are millimetres, Z up (like the slicers). The plate is centred on the origin. */
@@ -102,11 +116,11 @@ export class Viewport {
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.display = 'block';
 
-    this.scene.background = new Color('#24262c');
+    this.scene.background = new Color('#141414');
     this.camera.up.set(0, 0, 1); // before OrbitControls reads it
 
     // Headlight follows the camera so painted surfaces are always lit the same way.
-    this.scene.add(new HemisphereLight('#ffffff', '#444a55', 1.6));
+    this.scene.add(new HemisphereLight('#ffffff', '#444444', 1.6));
     const head = new DirectionalLight('#ffffff', 1.4);
     head.position.set(0.3, 0.4, 1);
     this.camera.add(head);
@@ -170,7 +184,7 @@ export class Viewport {
     edges.visible = this.edgesVisible && !this.preview;
     obj.add(edges);
 
-    this.views.set(id, { mesh: obj, edges, paint: null });
+    this.views.set(id, { mesh: obj, edges, paint: null, highlight: null, cut: null });
     this.objects.add(obj);
     this.applySelection();
     this.requestRender();
@@ -198,11 +212,20 @@ export class Viewport {
     view.mesh.geometry.dispose();
     disposeMaterial(view.mesh.material);
     view.mesh.geometry = g;
-    view.mesh.material = textures.map((t) => createPaintMaterial(this.palette, t));
+    view.mesh.material = textures.map((t) => {
+      const m = createPaintMaterial(this.palette, t);
+      m.visible = !view.cut;
+      return m;
+    });
     view.mesh.raycast = acceleratedRaycast;
     view.paint = { atlas, maps, pageOf: triPages(atlas), textures, bvh };
     this.applySelection();
     this.requestRender();
+  }
+
+  /** Ids of visible objects whose paint surface is ready. */
+  paintableIds(): string[] {
+    return [...this.views].filter(([, v]) => v.mesh.visible && v.paint).map(([id]) => id);
   }
 
   paintBinding(id: string): PaintBinding | null {
@@ -237,7 +260,73 @@ export class Viewport {
   setPalette(colors: readonly string[]): void {
     const u = this.palette.value;
     for (let i = 0; i < u.length; i++) u[i]!.set(colors[Math.max(0, i - 1)] ?? colors[0] ?? '#c9ccd3');
+    for (const v of this.views.values()) if (v.cut) this.colourCut(v.cut);
     this.requestRender();
+  }
+
+  /**
+   * Shows the export cut instead of the painted surface (null goes back). The cut
+   * mesh is a child of the object, so it follows its transform.
+   */
+  setCutPreview(id: string, cut: SlotMesh | null): void {
+    const view = this.views.get(id);
+    if (!view) return;
+    if (view.cut) {
+      view.mesh.remove(view.cut.group);
+      view.cut.group.traverse((o) => {
+        if (o instanceof Mesh || o instanceof LineSegments) {
+          o.geometry.dispose();
+          disposeMaterial(o.material);
+        }
+      });
+      view.cut = null;
+    }
+    const mats = view.mesh.material;
+    for (const m of Array.isArray(mats) ? mats : [mats]) m.visible = !cut;
+    view.edges.visible = !cut && this.edgesVisible && !this.preview;
+    if (cut) {
+      const T = cut.slots.length;
+      const pos = new Float32Array(T * 9);
+      for (let t = 0; t < T; t++) {
+        for (let k = 0; k < 3; k++) {
+          const v = cut.indices[t * 3 + k]! * 3;
+          pos[t * 9 + k * 3] = cut.positions[v]!;
+          pos[t * 9 + k * 3 + 1] = cut.positions[v + 1]!;
+          pos[t * 9 + k * 3 + 2] = cut.positions[v + 2]!;
+        }
+      }
+      const g = new BufferGeometry();
+      g.setAttribute('position', new BufferAttribute(pos, 3));
+      const colors = new BufferAttribute(new Float32Array(T * 9), 3);
+      g.setAttribute('color', colors);
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      const group = new Group();
+      group.add(new Mesh(g, new MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 })));
+      const wire = new LineSegments(
+        new WireframeGeometry(g),
+        new LineBasicMaterial({ color: '#000000', transparent: true, opacity: 0.18 }),
+      );
+      group.add(wire);
+      view.mesh.add(group);
+      view.cut = { group, slots: cut.slots, colors };
+      this.colourCut(view.cut);
+    }
+    this.requestRender();
+  }
+
+  private colourCut(cut: NonNullable<ViewObject['cut']>): void {
+    const u = this.palette.value;
+    const a = cut.colors.array as Float32Array;
+    for (let t = 0; t < cut.slots.length; t++) {
+      const c = u[cut.slots[t]!] ?? u[1]!;
+      for (let k = 0; k < 3; k++) {
+        a[t * 9 + k * 3] = c.r;
+        a[t * 9 + k * 3 + 1] = c.g;
+        a[t * 9 + k * 3 + 2] = c.b;
+      }
+    }
+    cut.colors.needsUpdate = true;
   }
 
   /** World = source × scale + offset (mm). */
@@ -274,6 +363,14 @@ export class Viewport {
   }
 
   private disposePaint(view: ViewObject): void {
+    if (view.highlight) {
+      view.mesh.remove(view.highlight);
+      // Detach the shared positions first, so disposing frees only the preview's index buffer.
+      view.highlight.geometry.deleteAttribute('position');
+      view.highlight.geometry.dispose();
+      (view.highlight.material as Material).dispose();
+      view.highlight = null;
+    }
     if (!view.paint) return;
     view.paint.textures.forEach((t) => t.dispose());
     view.mesh.geometry.boundsTree = undefined;
@@ -296,7 +393,7 @@ export class Viewport {
 
   setEdgeHighlightsVisible(visible: boolean): void {
     this.edgesVisible = visible;
-    for (const v of this.views.values()) v.edges.visible = visible && !this.preview;
+    for (const v of this.views.values()) v.edges.visible = visible && !this.preview && !v.cut;
     this.requestRender();
   }
 
@@ -341,7 +438,66 @@ export class Viewport {
     const hit = this.castFrom(clientX, clientY, meshes);
     if (!hit) return null;
     const id = hit.object.userData.id as string;
-    return { id, point: hit.point.clone(), ready: !!this.views.get(id)?.paint };
+    return { id, point: hit.point.clone(), ready: !!this.views.get(id)?.paint, tri: hit.faceIndex ?? -1 };
+  }
+
+  /**
+   * Shows some paint triangles of one object tinted (the fill preview), or hides the
+   * preview (id null). Only one object shows a preview at a time.
+   */
+  setHighlight(id: string | null, tris: ArrayLike<number> | null = null, color = '#ffffff'): void {
+    for (const [vid, v] of this.views) {
+      if (v.highlight && (vid !== id || !tris)) v.highlight.visible = false;
+    }
+    const view = id ? this.views.get(id) : undefined;
+    if (!view?.paint || !tris) {
+      this.requestRender();
+      return;
+    }
+    let h = view.highlight;
+    if (!h) {
+      const src = view.mesh.geometry;
+      const g = new BufferGeometry();
+      g.setAttribute('position', src.getAttribute('position'));
+      // Sized for every triangle once; each preview fills the front and sets the draw range.
+      g.setIndex(new BufferAttribute(new Uint32Array(src.index!.count), 1));
+      const m = new MeshBasicMaterial({
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      h = new Mesh(g, m);
+      h.raycast = () => {};
+      h.renderOrder = 10;
+      view.mesh.add(h);
+      view.highlight = h;
+    }
+    const I = view.paint.atlas.indices;
+    const index = h.geometry.index!;
+    const out = index.array as Uint32Array;
+    for (let i = 0; i < tris.length; i++) {
+      const t = tris[i]!;
+      out[i * 3] = I[t * 3]!;
+      out[i * 3 + 1] = I[t * 3 + 1]!;
+      out[i * 3 + 2] = I[t * 3 + 2]!;
+    }
+    index.clearUpdateRanges();
+    index.addUpdateRange(0, tris.length * 3);
+    index.needsUpdate = true;
+    h.geometry.setDrawRange(0, tris.length * 3);
+    (h.material as MeshBasicMaterial).color.set(color);
+    h.visible = true;
+    this.requestRender();
+  }
+
+  /** Projects a world point to client coordinates (for screen-space tools). */
+  toClient(world: Vector3): { x: number; y: number; inFront: boolean } {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const v = world.clone().project(this.camera);
+    return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (0.5 - v.y * 0.5) * r.height, inFront: v.z < 1 };
   }
 
   /** Renders the view-space depth of the visible objects and reads it back (once per stroke). */
@@ -520,7 +676,7 @@ export class Viewport {
     this.plate.clear();
     const { w, d } = this.plateSize;
 
-    const surface = new Mesh(new PlaneGeometry(w, d), new MeshBasicMaterial({ color: '#30333b' }));
+    const surface = new Mesh(new PlaneGeometry(w, d), new MeshBasicMaterial({ color: '#1c1c1c' }));
     surface.position.z = -0.01;
     surface.renderOrder = -1;
 
@@ -535,7 +691,7 @@ export class Viewport {
         new BufferGeometry().setAttribute('position', new Float32BufferAttribute(pts, 3)),
         new LineBasicMaterial({ color }),
       );
-    const grid = new Group().add(lines(minor, '#3a3e47'), lines(major, '#4d525e'));
+    const grid = new Group().add(lines(minor, '#2a2a2a'), lines(major, '#3c3c3c'));
 
     const outline = new LineSegments(
       new BufferGeometry().setAttribute(
@@ -546,7 +702,7 @@ export class Viewport {
           3,
         ),
       ),
-      new LineBasicMaterial({ color: '#7a8190' }),
+      new LineBasicMaterial({ color: '#5e772c' }),
     );
 
     // Small X (red) / Y (green) axis marks at the front-left corner.

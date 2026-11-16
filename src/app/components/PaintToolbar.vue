@@ -1,16 +1,28 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { BRUSH_MAX, BRUSH_MIN, usePaintStore, type Tool } from '../stores/paint';
+import { BRUSH_MAX, BRUSH_MIN, FILL_ANGLE_MAX, usePaintStore, type FillMode, type Tool } from '../stores/paint';
+import { useSceneStore } from '../stores/scene';
 import { usePaletteStore } from '../stores/palette';
 
 const paint = usePaintStore();
 const palette = usePaletteStore();
+const scene = useSceneStore();
 
 const tools: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'select', label: 'Select', key: 'V', icon: 'M5 3l13 8-6 1.5L9 19z' },
   { id: 'brush', label: 'Brush', key: 'B', icon: 'M14 4l6 6-8.5 8.5a3 3 0 01-4.2 0L5.5 16.7a3 3 0 010-4.2zM4 20h5' },
   { id: 'eraser', label: 'Eraser', key: 'E', icon: 'M8 20h12M5.6 15.6l8-8a2 2 0 012.8 0l2 2a2 2 0 010 2.8L12 18.8H8.8z' },
+  { id: 'fill', label: 'Fill', key: 'G', icon: 'M4 12l7-7 8 8-7 7zM11 5L8.5 2.5M19 15.5c0 1.5 1 2.5 1 3.5a1 1 0 01-2 0c0-1 1-2 1-3.5z' },
+  { id: 'line', label: 'Line', key: 'U', icon: 'M5 19L19 5M5 19h0M19 5h0' },
+  { id: 'lasso', label: 'Lasso fill', key: 'L', icon: 'M12 5c4.4 0 8 2 8 4.5S16.4 14 12 14s-8-2-8-4.5S7.6 5 12 5zM7 13c-1 2 0 4 2 4s2 2 1 4' },
 ];
+
+const fillModes: { id: FillMode; label: string; title: string }[] = [
+  { id: 'angle', label: 'Angle', title: 'Spread across the surface until it bends more than the angle' },
+  { id: 'face', label: 'CAD face', title: 'One face of a STEP model (other models use the angle)' },
+  { id: 'island', label: 'Whole piece', title: 'Every triangle connected to the one you click' },
+];
+const hasCadFaces = computed(() => scene.items.some((i) => i.cadFaces !== null));
 
 // Log-scale slider so small brushes get as much travel as big ones.
 const STEPS = 1000;
@@ -22,6 +34,7 @@ const slider = computed({
 });
 
 const painting = computed(() => paint.tool !== 'select');
+const sized = computed(() => paint.tool === 'brush' || paint.tool === 'eraser' || paint.tool === 'line');
 const axes = ['X', 'Y', 'Z'] as const;
 </script>
 
@@ -45,13 +58,37 @@ const axes = ['X', 'Y', 'Z'] as const;
 
     <div v-if="painting" class="group options">
       <span
-        v-if="paint.tool === 'brush'"
+        v-if="paint.tool !== 'eraser'"
         class="slot"
         :style="{ background: palette.activeSlot.color }"
         :title="`Painting slot ${palette.active}: ${palette.activeSlot.name}`"
         >{{ palette.active }}</span
       >
-      <label class="size" title="Brush size ([ and ] to change)">
+      <span v-if="paint.tool === 'fill'" class="sym" role="radiogroup" aria-label="Fill by">
+        <button
+          v-for="m in fillModes"
+          :key="m.id"
+          class="tog text"
+          role="radio"
+          :class="{ on: paint.fillMode === m.id }"
+          :aria-checked="paint.fillMode === m.id"
+          :disabled="m.id === 'face' && !hasCadFaces"
+          :title="m.id === 'face' && !hasCadFaces ? 'Needs a STEP import' : m.title"
+          @click="paint.fillMode = m.id"
+        >
+          {{ m.label }}
+        </button>
+      </span>
+      <label v-if="paint.tool === 'fill' && paint.fillMode === 'angle'" class="size" title="Largest bend between neighbouring triangles the fill crosses">
+        <span class="muted">Angle</span>
+        <input v-model.number="paint.fillAngle" type="range" name="fillAngle" min="1" :max="FILL_ANGLE_MAX" step="1" aria-label="Fill angle" />
+        <span class="deg">{{ paint.fillAngle }}°</span>
+      </label>
+      <label v-if="paint.tool === 'lasso'" class="size" title="Also paint surfaces facing away or hidden behind others">
+        <input v-model="paint.lassoThrough" type="checkbox" name="lassoThrough" />
+        <span>Paint hidden surfaces too</span>
+      </label>
+      <label v-if="sized" class="size" :title="paint.tool === 'line' ? 'Line width ([ and ] to change)' : 'Brush size ([ and ] to change)'">
         <span class="muted">Size</span>
         <input v-model.number="slider" type="range" name="brushSize" :min="0" :max="STEPS" step="1" aria-label="Brush size" />
         <input
@@ -124,7 +161,7 @@ const axes = ['X', 'Y', 'Z'] as const;
   padding: 0.2rem;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
 }
 .options {
   gap: 0.6rem;
@@ -137,7 +174,7 @@ const axes = ['X', 'Y', 'Z'] as const;
   min-width: 2rem;
   height: 2rem;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 0;
   background: none;
   color: var(--text);
   font: inherit;
@@ -152,8 +189,20 @@ const axes = ['X', 'Y', 'Z'] as const;
   height: 1.7rem;
   font-weight: 600;
 }
+.tog.text {
+  padding: 0 0.45rem;
+  font-weight: 500;
+}
+.tog:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.deg {
+  min-width: 2.2rem;
+  font-variant-numeric: tabular-nums;
+}
 .tool:hover:not(:disabled),
-.tog:hover {
+.tog:hover:not(:disabled) {
   background: var(--panel-raised);
 }
 .tool.on,
@@ -179,7 +228,7 @@ svg {
   place-items: center;
   width: 1.5rem;
   height: 1.5rem;
-  border-radius: 4px;
+  border-radius: 0;
   border: 1px solid rgb(255 255 255 / 0.35);
   font-size: 0.75rem;
   font-weight: 700;
@@ -204,7 +253,7 @@ svg {
   color: var(--text);
   background: var(--panel-raised);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 0.15rem 0.3rem;
 }
 .muted {

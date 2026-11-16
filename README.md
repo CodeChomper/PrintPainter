@@ -6,6 +6,10 @@ It runs entirely in your browser as an installable web app. Your models never le
 
 > **Status:** early development (milestone M1). See [PLAN.md](PLAN.md) for the roadmap and [docs/3mf-dialects.md](docs/3mf-dialects.md) for slicer format findings.
 
+## Try it
+
+Open **https://codechomper.github.io/PrintPainter/** in Chrome or Edge. Use the install icon in the address bar to install it as an app that also works offline.
+
 ## Development
 
 Requires Node.js 22+.
@@ -18,6 +22,10 @@ npm run typecheck
 npm run build      # production build in dist/
 npm run spike:3mf  # regenerate the M0 3MF test files
 ```
+
+## Support
+
+PrintPainter is free. If it's useful to you, you can [support development on Ko-fi](https://ko-fi.com/codechomper).
 
 ## Licence
 

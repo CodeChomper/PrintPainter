@@ -15,9 +15,13 @@
     "typecheck": "vue-tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "spike:3mf": "node spikes/m0-3mf/build.mjs"
+    "spike:3mf": "node spikes/m0-3mf/build.mjs",
+    "spike:export": "vitest run --config spikes/m3-export/vitest.config.ts"
   },
   "dependencies": {
+    "@fontsource/archivo-black": "5.3.0",
+    "@fontsource/space-grotesk": "5.3.0",
+    "cdt2d": "1.0.0",
     "comlink": "4.4.2",
     "fflate": "0.8.3",
     "occt-import-js": "0.0.23",

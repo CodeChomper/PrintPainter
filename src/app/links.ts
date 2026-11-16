@@ -1,5 +1,4 @@
-// TODO: fill in once the GitHub repo and Ko-fi page exist.
 export const LINKS = {
-  repo: '',
-  kofi: '',
+  repo: 'https://github.com/CodeChomper/PrintPainter',
+  kofi: 'https://ko-fi.com/codechomper',
 } as const;

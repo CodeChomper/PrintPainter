@@ -29,7 +29,7 @@ const ui = useUiStore();
   gap: 0.5rem;
   align-items: flex-start;
   padding: 0.6rem 0.75rem;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--panel-raised);
   border: 1px solid var(--border);
   border-left: 4px solid var(--muted);

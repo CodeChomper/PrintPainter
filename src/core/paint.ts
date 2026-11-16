@@ -264,7 +264,7 @@ export function paintDab(
 
 const _q: [number, number] = [0, 0];
 /** Closest point to (px, py) on triangle abc (2D). Reuses one result array. */
-function closestOnTriangle(
+export function closestOnTriangle(
   px: number, py: number,
   ax: number, ay: number, bx: number, by: number, cx: number, cy: number,
 ): [number, number] {

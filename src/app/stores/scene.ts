@@ -2,7 +2,8 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { chooseTexelMm, surfaceArea } from '@/core/atlas';
 import { boundsSize, boundsUnion, meshBounds, type Bounds } from '@/core/mesh';
-import { createMaps, resampleMaps } from '@/core/paint';
+import { defaultDoc, resampleDoc } from '@/core/layers';
+import { createMaps } from '@/core/paint';
 import { findFreeSpot, type Rect } from '@/core/placement';
 import { formatDims, UNIT_TO_MM, type LengthUnit, type UnitGuess } from '@/core/units';
 import {
@@ -16,11 +17,13 @@ import {
   type ImportOptions,
   type StepQuality,
 } from '@/io/import';
+import type { ProjectObject } from '@/io/project/ppaint';
 import { platform } from '@/platform';
 import { sceneObjects, type PaintState, type SceneObject } from '../document';
 import { getViewport } from '../engine';
 import { atlasInWorker, cleanupInWorker } from '../services/workers';
 import { usePaintStore } from './paint';
+import { composerOf, useLayersStore } from './layers';
 import { usePaletteStore } from './palette';
 import { useUiStore } from './ui';
 
@@ -82,7 +85,7 @@ function countFaces(ids: Int32Array | undefined): number | null {
 }
 
 // Matches the viewport's default plate. Printer/plate selection comes later.
-const PLATE = { w: 256, d: 256 };
+export const PLATE = { w: 256, d: 256 };
 
 function footprint(o: SceneObject): Rect {
   const s = UNIT_TO_MM[o.unit];
@@ -272,6 +275,8 @@ export const useSceneStore = defineStore('scene', () => {
         paint: null,
         paintState: 'preparing',
         paintJob: 0,
+        surfaceRev: 0,
+        paintRev: 0,
       };
       sceneObjects.set(obj.id, obj);
       vp?.addObject(obj.id, obj.mesh, obj.report.openEdges, obj.report.nonManifoldEdges);
@@ -319,10 +324,17 @@ export const useSceneStore = defineStore('scene', () => {
       const atlas = await atlasInWorker(o.mesh, texelMm / mmPerUnit, maxPage);
       if (sceneObjects.get(o.id) !== o || o.paintJob !== job) return; // removed or superseded
       const old = o.paint;
-      const maps = old ? resampleMaps(old.atlas, old.maps, atlas) : createMaps(atlas);
-      if (old) usePaintStore().dropHistory(o.id);
-      o.paint = { atlas, maps, texelMm };
+      // Every layer and painted mask is carried over to the new atlas.
+      const doc = old ? resampleDoc(old.doc, old.atlas, atlas) : defaultDoc(createMaps(atlas));
+      const maps = createMaps(atlas);
+      if (old) {
+        useLayersStore().flush();
+        usePaintStore().dropHistory(o.id);
+      }
+      o.paint = { atlas, maps, texelMm, doc, mapRevs: new Map() };
+      composerOf(o)!.refresh();
       o.paintState = 'ready';
+      o.surfaceRev++;
       getViewport()?.setPaintSurface(o.id, atlas, maps);
       if (texelMm > 0.1 + 1e-9) {
         ui.notify('info', `${o.name} has a large surface, so it paints at ${texelMm.toFixed(2)} mm detail instead of 0.10 mm.`);
@@ -351,13 +363,67 @@ export const useSceneStore = defineStore('scene', () => {
   }
 
   function remove(id: string) {
+    if (isolatedId.value === id) unisolate();
     const o = sceneObjects.get(id);
     sceneObjects.delete(id);
     getViewport()?.removeObject(id);
+    useLayersStore().flush();
     usePaintStore().dropHistory(id);
+    useLayersStore().forget(id);
     items.value = items.value.filter((i) => i.id !== id);
     if (o) refreshSummaries(o.importId);
     if (selectedId.value === id) select(null);
+  }
+
+  /** Removes every object. */
+  function clear() {
+    for (const id of [...sceneObjects.keys()]) remove(id);
+  }
+
+  /**
+   * Adds objects from a project file or the autosave. Paint built for other units, or
+   * with pages too big for this GPU, is rebuilt (and carried over) in the background.
+   */
+  function restore(objects: ProjectObject[]) {
+    const vp = getViewport();
+    const maxPage = vp?.maxTextureSize ?? 8192;
+    const rebuild: SceneObject[] = [];
+    for (const p of objects) {
+      const fits = !!p.paint && p.paint.atlas.pages.every((pg) => pg.width <= maxPage && pg.height <= maxPage);
+      const obj: SceneObject = {
+        id: p.id,
+        name: p.name,
+        fileName: p.fileName,
+        format: p.format,
+        importId: p.importId,
+        mesh: p.mesh,
+        report: p.report,
+        unit: p.unit,
+        offset: [...p.offset],
+        srcBounds: meshBounds(p.mesh),
+        hidden: p.hidden,
+        paint: p.paint ? { atlas: p.paint.atlas, maps: p.paint.maps, texelMm: p.paint.texelMm, doc: p.paint.doc, mapRevs: new Map() } : null,
+        paintState: p.paint && p.paint.current && fits ? 'ready' : 'preparing',
+        paintJob: 0,
+        surfaceRev: 0,
+        paintRev: 0,
+      };
+      sceneObjects.set(obj.id, obj);
+      if (obj.paintState === 'ready') composerOf(obj)!.refresh();
+      vp?.addObject(obj.id, obj.mesh, obj.report.openEdges, obj.report.nonManifoldEdges);
+      vp?.setObjectTransform(obj.id, UNIT_TO_MM[obj.unit], obj.offset);
+      if (obj.paint && fits) vp?.setPaintSurface(obj.id, obj.paint.atlas, obj.paint.maps);
+      vp?.setHidden(obj.id, obj.hidden);
+      items.value.push(summarize(obj));
+      if (obj.paintState === 'preparing') rebuild.push(obj);
+    }
+    items.value = items.value.map((it) => {
+      const o = sceneObjects.get(it.id);
+      return o ? summarize(o) : it;
+    });
+    vp?.setEdgeHighlightsVisible(showEdges.value);
+    if (sceneObjects.size) vp?.frame();
+    for (const o of rebuild) void preparePaint(o);
   }
 
   /**
@@ -401,12 +467,37 @@ export const useSceneStore = defineStore('scene', () => {
     refresh(id);
   }
 
+  /** The object shown on its own, if any. */
+  const isolatedId = ref<string | null>(null);
+  /** Who was hidden before isolating, so leaving it puts that back. */
+  let beforeIsolate: Map<string, boolean> | null = null;
+
   /** Hides every object except this one. */
   function isolate(id: string) {
+    if (!sceneObjects.has(id)) return;
+    if (!isolatedId.value) beforeIsolate = new Map([...sceneObjects.values()].map((o) => [o.id, o.hidden]));
+    isolatedId.value = id;
     for (const o of sceneObjects.values()) setHidden(o.id, o.id !== id);
   }
 
+  /** Leaves isolation: every object goes back to how it was (objects added since stay shown). */
+  function unisolate() {
+    if (!isolatedId.value) return;
+    const prev = beforeIsolate;
+    isolatedId.value = null;
+    beforeIsolate = null;
+    for (const o of sceneObjects.values()) setHidden(o.id, prev?.get(o.id) ?? false);
+  }
+
+  /** "/": isolate the selected object, or leave isolation. */
+  function toggleIsolate() {
+    if (isolatedId.value) unisolate();
+    else if (selectedId.value) isolate(selectedId.value);
+  }
+
   function showAll() {
+    isolatedId.value = null;
+    beforeIsolate = null;
     for (const o of sceneObjects.values()) setHidden(o.id, false);
   }
 
@@ -447,10 +538,15 @@ export const useSceneStore = defineStore('scene', () => {
     importFiles,
     select,
     remove,
+    clear,
+    restore,
     setUnit,
     setShowEdges,
     setHidden,
     isolate,
+    isolatedId,
+    unisolate,
+    toggleIsolate,
     showAll,
     syncViewport,
   };

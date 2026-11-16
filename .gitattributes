@@ -6,3 +6,4 @@
 *.glb binary
 *.step text eol=lf
 *.stp text eol=lf
+*.ppaint binary

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
-import { MAX_SLOTS, remapSlots, slotHistogram } from '@/core/paint';
+import { docSlotUse } from '@/core/layers';
+import { MAX_SLOTS } from '@/core/paint';
 import {
   DEFAULT_PALETTE,
   parsePalette,
@@ -11,7 +12,7 @@ import {
 import { platform } from '@/platform';
 import { sceneObjects } from '../document';
 import { getViewport } from '../engine';
-import { usePaintStore } from './paint';
+import { useLayersStore } from './layers';
 import { useUiStore } from './ui';
 
 const CURRENT_KEY = 'pp.palette';
@@ -42,26 +43,20 @@ function save(key: string, value: unknown): void {
 const isSlots = (v: unknown) =>
   Array.isArray(v) && v.length >= 1 && v.length <= MAX_SLOTS && v.every((s) => typeof s?.color === 'string');
 
-/** How many texels use each slot value, across every object. */
+/** How much each slot value is used, across every object's layers (hidden ones too). */
 function usage(): Uint32Array {
   const total = new Uint32Array(256);
   for (const o of sceneObjects.values()) {
     if (!o.paint) continue;
-    const h = slotHistogram(o.paint.maps);
+    const h = docSlotUse(o.paint.doc);
     for (let i = 0; i < 256; i++) total[i]! += h[i]!;
   }
   return total;
 }
 
-/** Rewrites every object's paint (and the undo data) through a lookup table. */
+/** Rewrites every object's layers (and the undo data) through a lookup table. */
 function applyLut(lut: Uint8Array): void {
-  const vp = getViewport();
-  for (const o of sceneObjects.values()) {
-    if (!o.paint) continue;
-    remapSlots(o.paint.maps, lut);
-    vp?.uploadPaint(o.id, 'all');
-  }
-  usePaintStore().remapHistory(lut);
+  useLayersStore().remapSlots(lut);
 }
 
 export const usePaletteStore = defineStore('palette', () => {
@@ -180,6 +175,12 @@ export const usePaletteStore = defineStore('palette', () => {
     library.value = next;
   }
 
+  /** Takes a project's palette as is (its paint already matches it). */
+  function setSlots(next: PaletteSlot[]) {
+    slots.value = next.map((s) => ({ ...s }));
+    active.value = Math.min(Math.max(1, active.value), slots.value.length);
+  }
+
   function resetToDefault() {
     replace(DEFAULT_PALETTE.map((s) => ({ ...s })), 'The default palette');
   }
@@ -200,5 +201,6 @@ export const usePaletteStore = defineStore('palette', () => {
     loadFromLibrary,
     deleteFromLibrary,
     resetToDefault,
+    setSlots,
   };
 });

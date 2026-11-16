@@ -31,7 +31,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutside));
 <template>
   <section class="palette" aria-label="Palette">
     <header>
-      <h3>Palette</h3>
+      <h3 class="section-title">Palette</h3>
       <details ref="menu" class="menu">
         <summary class="icon-btn" title="Palette options" aria-label="Palette options">⋯</summary>
         <div class="menu-list" role="menu">
@@ -123,10 +123,6 @@ header {
 }
 h3 {
   margin: 0;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
 }
 .menu {
   position: relative;
@@ -142,7 +138,7 @@ h3 {
   place-items: center;
   width: 1.6rem;
   height: 1.4rem;
-  border-radius: 4px;
+  border-radius: 0;
   cursor: pointer;
   color: var(--muted);
   font-size: 1.1rem;
@@ -162,7 +158,7 @@ h3 {
   padding: 0.3rem;
   background: var(--panel-raised);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
 }
 .menu-list button {
@@ -175,7 +171,7 @@ h3 {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.35rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 0;
   cursor: pointer;
 }
 .menu-list button:hover {
@@ -218,7 +214,7 @@ li {
   align-items: center;
   gap: 0.3rem;
   padding: 0.2rem 0.3rem;
-  border-radius: 4px;
+  border-radius: 0;
   border: 1px solid transparent;
   cursor: pointer;
 }
@@ -241,7 +237,7 @@ li.active {
   height: 1.4rem;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 0;
   background: none;
   cursor: pointer;
 }
@@ -250,7 +246,7 @@ li.active {
 }
 .swatch::-webkit-color-swatch {
   border: none;
-  border-radius: 2px;
+  border-radius: 0;
 }
 .name,
 .mat {
@@ -260,7 +256,7 @@ li.active {
   color: var(--text);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 0;
   padding: 0.1rem 0.25rem;
 }
 .name {

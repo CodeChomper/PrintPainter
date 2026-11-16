@@ -23,13 +23,16 @@ export default defineConfig({
         name: 'PrintPainter',
         short_name: 'PrintPainter',
         description: 'Paint filaments on 3D models and export slice-ready 3MF files.',
-        theme_color: '#1b1d22',
-        background_color: '#1b1d22',
+        theme_color: '#080808',
+        background_color: '#080808',
         display: 'standalone',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+        // The installed app opens .ppaint projects (handled through window.launchQueue).
+        file_handlers: [{ action: './', accept: { 'application/x-printpainter-project': ['.ppaint'] } }],
+        launch_handler: { client_mode: 'focus-existing' },
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,wasm,txt}'],
+        globPatterns: ['**/*.{js,css,html,svg,wasm,txt,woff2}'],
         // occt-import-js.wasm is ~7.6 MB; precache it so STEP import works offline.
         maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
       },

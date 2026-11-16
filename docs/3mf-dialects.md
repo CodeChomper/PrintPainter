@@ -42,6 +42,16 @@ Palette order: White, Red, Green, Blue, Yellow, Black, Orange, Purple, Cyan, Pin
 | **G** | Core-spec `<basematerials>` colours only, no `paint_color` |
 | **P** | Prusa: `slic3rpe:mmu_segmentation`, `slic3rpe:Version3mf = 1`, `slic3rpe:MmPaintingVersion = 1`, `Metadata/Slic3r_PE.config` (`extruder_colour`, `filament_colour`, `filament_type`, `nozzle_diameter` × n) |
 
+### M3 export samples (`npm run spike:export`, written to `spikes/m3-export/out/`)
+
+Made by the real export pipeline (atlas → paint → cut → writer), route A (`paint_color` only). The cut mesh is watertight and every triangle has one filament.
+
+| File | Content |
+|---|---|
+| `X-cube-4c` | 30 mm cube: red disc on the front (−Y), blue ball cut out of the top +X+Y corner (crosses three faces), green band around the lower sides, white elsewhere |
+| `X-cube-4c-settings` | Same, plus `Metadata/project_settings.config` with the four filament colours (does OrcaSlicer apply them?) |
+| `X-sphere-16c` | 40 mm sphere in 16 wavy latitude bands, filaments 1 (bottom) to 16 (top) |
+
 ## How to test
 
 For each file: **File → Open project** (Ctrl+O) in the slicer. If the slicer asks, choose to load the project/settings rather than geometry only. Then note:
@@ -72,6 +82,9 @@ Use ✅ / ❌ / ⚠️ plus a note. "Paint" = regions in the right place. "Filam
 | F-c16 | skipped (same as F-c4) | | n/a |
 | G-c4 | ✅ Same notice, shown inside a 2-step **Import Model** wizard (see below). Exact colours, painting correct, printer untouched, slices. Filament numbers re-ordered, material type not carried | | n/a |
 | G-c16 | ⚠️ Wizard detects and keeps all 16 colours, but Filament Matching **auto-matched Pink `#EC407A` to the existing Red filament** (left over from G-c4), and Complete All Filaments only fills empty rows. Result: 15 filaments, the Pink square printed Red. Painting otherwise correct, printer untouched, slices | | n/a |
+| X-cube-4c | ✅ Usual "not from Bambu Lab" notice. All regions in the right place, edges look smooth, slices. Colours come from the filaments already in the project (5 listed, left over from another project; the file's 4 map to filaments 1–4), as expected for route A | | n/a |
+| X-cube-4c-settings | n/a (same as B) | | n/a |
+| X-sphere-16c | ✅ Same notice. 16 filaments listed, bands use filaments 1–16 in order with none skipped or doubled (codes up to `DC` work), slices | | n/a |
 | P-c4 | (optional) | (optional) | |
 | P-c16 | (optional) | (optional) | |
 

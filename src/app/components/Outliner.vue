@@ -6,7 +6,7 @@ const scene = useSceneStore();
 
 <template>
   <section class="outliner" aria-label="Objects">
-    <h3>Objects</h3>
+    <h3 class="section-title">Objects</h3>
     <p v-if="!scene.items.length" class="muted">
       No objects yet. Use <strong>Import…</strong> or drop STL, OBJ, 3MF, STEP, glTF, PLY or FBX files on the view.
     </p>
@@ -53,10 +53,6 @@ const scene = useSceneStore();
 <style scoped>
 h3 {
   margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
 }
 .muted {
   color: var(--muted);
@@ -72,14 +68,15 @@ li {
   align-items: center;
   gap: 0.4rem;
   padding: 0.3rem 0.4rem;
-  border-radius: 4px;
+  border-radius: 0;
   cursor: pointer;
 }
 li:hover {
   background: var(--panel-raised);
 }
 li.selected {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .name {
   flex: 1;
@@ -134,10 +131,11 @@ li.selected {
   place-items: center;
   width: 1.1rem;
   height: 1.1rem;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--danger);
-  color: #1b1d22;
-  font-weight: 700;
+  color: var(--on-accent);
+  font-family: var(--font-display);
+  font-weight: 400;
   font-size: 0.75rem;
 }
 .badge.warn {
@@ -145,10 +143,11 @@ li.selected {
   place-items: center;
   width: 1.1rem;
   height: 1.1rem;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--warning);
-  color: #1b1d22;
-  font-weight: 700;
+  color: var(--on-accent);
+  font-family: var(--font-display);
+  font-weight: 400;
   font-size: 0.75rem;
 }
 .remove {

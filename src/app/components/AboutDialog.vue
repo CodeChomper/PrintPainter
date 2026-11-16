@@ -15,6 +15,7 @@ watch(
 
 <template>
   <dialog ref="dialog" class="about" @close="ui.aboutOpen = false">
+    <div class="term" aria-hidden="true"><i class="o" /><i class="g" /><i class="d" /><span>~/codechomper/printpainter</span></div>
     <h2>PrintPainter <small>{{ version }}</small></h2>
     <p>Paint filaments on 3D models and export slice-ready 3MF files.</p>
     <p>Your models never leave your computer. PrintPainter has no telemetry.</p>
@@ -37,19 +38,48 @@ watch(
 .about {
   max-width: min(32rem, calc(100vw - 2rem));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: 4px solid var(--accent);
+  border-radius: 0;
   background: var(--panel);
   color: var(--text);
   padding: 1.25rem 1.5rem;
 }
 .about::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.7);
 }
 h2 {
   margin: 0 0 0.75rem;
   font-size: 1.15rem;
 }
+.term {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -0.25rem 0 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.term i {
+  width: 9px;
+  height: 9px;
+}
+.term .o {
+  background: var(--orange);
+}
+.term .g {
+  background: var(--neon-green);
+}
+.term .d {
+  background: var(--dark-green);
+}
+.term span {
+  margin-left: 0.4rem;
+}
 small {
+  font-family: var(--font-body);
+  text-transform: none;
   color: var(--muted);
   font-weight: normal;
   font-size: 0.8rem;

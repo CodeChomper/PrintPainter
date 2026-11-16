@@ -49,13 +49,14 @@ const sizeIn = (u: LengthUnit) => formatDims(q.value!.size.map((s) => s * UNIT_T
 .units {
   width: min(30rem, calc(100vw - 2rem));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: 4px solid var(--accent);
+  border-radius: 0;
   background: var(--panel);
   color: var(--text);
   padding: 1.25rem 1.5rem;
 }
 .units::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.7);
 }
 h2 {
   margin: 0 0 0.6rem;
@@ -79,7 +80,7 @@ label {
   gap: 0.15rem 0.6rem;
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   cursor: pointer;
 }
 label.active {

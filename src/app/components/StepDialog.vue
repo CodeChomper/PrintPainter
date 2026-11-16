@@ -66,13 +66,14 @@ const submit = () => scene.answerStepQuestion(STEP_QUALITY_ORDER[index.value]!);
 .step {
   width: min(32rem, calc(100vw - 2rem));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: 4px solid var(--accent);
+  border-radius: 0;
   background: var(--panel);
   color: var(--text);
   padding: 1.25rem 1.5rem;
 }
 .step::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.7);
 }
 h2 {
   margin: 0 0 0.6rem;

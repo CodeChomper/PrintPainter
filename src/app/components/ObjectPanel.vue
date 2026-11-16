@@ -2,10 +2,8 @@
 import { computed } from 'vue';
 import { formatDims, UNIT_LABELS, type LengthUnit } from '@/core/units';
 import { useSceneStore } from '../stores/scene';
-import { usePaintStore } from '../stores/paint';
 
 const scene = useSceneStore();
-const paint = usePaintStore();
 const o = computed(() => scene.selected);
 const units = Object.entries(UNIT_LABELS) as [LengthUnit, string][];
 
@@ -24,7 +22,7 @@ const cleanupLines = computed(() => {
 
 <template>
   <section class="props" aria-label="Object properties">
-    <h3>Properties</h3>
+    <h3 class="section-title">Properties</h3>
     <p v-if="!o" class="muted">Select an object to see its details.</p>
     <template v-else>
       <dl>
@@ -78,12 +76,12 @@ const cleanupLines = computed(() => {
           <dt>Texture{{ o.paintPages.length === 1 ? '' : 's' }}</dt>
           <dd>{{ o.paintPages.join(', ') }}</dd>
         </dl>
-        <button class="btn" @click="paint.clearObject(o.id)">Clear paint</button>
       </template>
 
       <div class="row">
         <button class="btn" :title="o.hidden ? 'Show' : 'Hide (H)'" @click="scene.setHidden(o.id, !o.hidden)">{{ o.hidden ? 'Show' : 'Hide' }}</button>
-        <button class="btn" title="Hide everything else (Shift+H)" @click="scene.isolate(o.id)">Isolate</button>
+        <button v-if="scene.isolatedId" class="btn btn-accent" title="Show the other objects again (/)" @click="scene.unisolate()">Exit isolate</button>
+        <button v-else class="btn" title="Hide everything else (/ or Shift+H)" @click="scene.isolate(o.id)">Isolate</button>
       </div>
       <button class="btn danger" @click="scene.remove(o.id)">Remove object</button>
     </template>
@@ -93,14 +91,9 @@ const cleanupLines = computed(() => {
 <style scoped>
 h3 {
   margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
 }
 h4 {
   margin: 1rem 0 0.4rem;
-  font-size: 0.85rem;
 }
 .muted {
   color: var(--muted);
@@ -141,7 +134,7 @@ dd {
 .warn-box {
   border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
   background: color-mix(in srgb, var(--warning) 10%, transparent);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.5rem 0.6rem;
 }
 .warn-box p {
@@ -161,7 +154,7 @@ dd {
   display: inline-block;
   width: 0.7rem;
   height: 0.7rem;
-  border-radius: 2px;
+  border-radius: 0;
   margin-right: 0.4rem;
   vertical-align: -1px;
 }
