@@ -108,7 +108,6 @@ watch(
     if (viewport) viewport.renderer.domElement.style.cursor = p ? 'copy' : '';
   },
 );
-watch(() => paint.preview, (on) => viewport?.setPreview(on));
 
 onBeforeUnmount(() => {
   viewport?.renderer.domElement.removeEventListener('pointerdown', onPlaceDown, { capture: true });

@@ -113,6 +113,8 @@ export class PaintTool {
   private hovered: { id: string; atlas: PaintAtlas; key: string; erase: boolean; tris: Uint32Array } | null = null;
   private overlay: SVGSVGElement;
   private overlayPath: SVGPathElement;
+  /** Last pointer position over the canvas, to re-show the cursor after a 3D-mouse move. */
+  private lastPointer: PointerEvent | null = null;
 
   constructor(private vp: Viewport) {
     const el = vp.renderer.domElement;
@@ -132,7 +134,19 @@ export class PaintTool {
     on(el, 'pointerup', (e) => this.onUp(e));
     on(el, 'pointercancel', (e) => this.onUp(e));
     on(el, 'pointerleave', () => {
+      this.lastPointer = null;
       if (!this.stroke) this.clearHover();
+    });
+    // While a 3D mouse moves the view, the cursor is no longer over the same spot.
+    vp.strokeActive = () => !!this.stroke;
+    vp.onNavMotion = (moving) => {
+      if (this.stroke) return;
+      if (moving) this.clearHover();
+      else if (this.lastPointer) this.hover(this.lastPointer);
+    };
+    this.disposers.push(() => {
+      vp.strokeActive = () => false;
+      vp.onNavMotion = null;
     });
     const onShift = (e: KeyboardEvent) => {
       if (this.shiftDown === e.shiftKey) return;
@@ -232,6 +246,7 @@ export class PaintTool {
   }
 
   private onMove(e: PointerEvent): void {
+    this.lastPointer = e;
     const s = this.stroke;
     if (!s) {
       this.hover(e);

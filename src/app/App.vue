@@ -10,6 +10,7 @@ import ExportPanel from './components/ExportPanel.vue';
 import UnitsDialog from './components/UnitsDialog.vue';
 import StepDialog from './components/StepDialog.vue';
 import Toasts from './components/Toasts.vue';
+import SpaceMouseDialog from './components/SpaceMouseDialog.vue';
 import { useUiStore } from './stores/ui';
 import { useSceneStore } from './stores/scene';
 import { usePaintStore } from './stores/paint';
@@ -17,6 +18,7 @@ import { usePaletteStore } from './stores/palette';
 import { useExportStore } from './stores/export';
 import { useProjectStore } from './stores/project';
 import { useLayersStore } from './stores/layers';
+import { useSpaceMouseStore } from './stores/spaceMouse';
 import { NAV_PRESETS, type NavPreset } from '@/engine/navigation';
 import { getViewport } from './engine';
 
@@ -27,6 +29,7 @@ const palette = usePaletteStore();
 const ex = useExportStore();
 const project = useProjectStore();
 const layers = useLayersStore();
+const spaceMouse = useSpaceMouseStore();
 const presets = Object.entries(NAV_PRESETS) as [NavPreset, { label: string; hint: string }][];
 const hint = computed(() => NAV_PRESETS[ui.navPreset].hint);
 const toolHint = computed(() => {
@@ -93,7 +96,6 @@ function onKey(e: KeyboardEvent) {
   else if (key === 'g') paint.tool = 'fill';
   else if (key === 'u') paint.tool = 'line';
   else if (key === 'l') paint.tool = 'lasso';
-  else if (key === 'p') paint.preview = !paint.preview;
   else if (e.key === '[') paint.setSize(paint.size / 1.25);
   else if (e.key === ']') paint.setSize(paint.size * 1.25);
   else if (/^[0-9]$/.test(e.key)) palette.select(e.key === '0' ? 10 : Number(e.key));
@@ -101,6 +103,7 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', onKey);
   void project.start();
+  spaceMouse.start();
 });
 
 const autosaveText = computed(() => {
@@ -150,12 +153,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
       <button class="btn" title="Fit view (F)" @click="getViewport()?.frame()">Fit view</button>
       <span class="spacer" />
       <button v-if="ui.updateAvailable" class="btn btn-accent" @click="ui.update()">Update available: reload</button>
-      <label class="field">
-        Navigation
-        <select v-model="ui.navPreset" name="navPreset">
+      <label class="field" title="Mouse navigation">
+        <span class="nav-label">Navigation</span>
+        <select v-model="ui.navPreset" name="navPreset" aria-label="Navigation">
           <option v-for="[id, p] in presets" :key="id" :value="id">{{ p.label }}</option>
         </select>
       </label>
+      <button
+        class="btn sm-btn"
+        :aria-pressed="spaceMouse.dialogOpen"
+        :title="spaceMouse.connected ? `${spaceMouse.connected} connected: settings` : 'Connect a 3Dconnexion SpaceMouse'"
+        @click="spaceMouse.dialogOpen = !spaceMouse.dialogOpen"
+      >
+        <span class="led" :class="{ on: spaceMouse.connected }" />SpaceMouse
+      </button>
       <button class="btn" @click="ui.aboutOpen = true">About</button>
     </header>
 
@@ -188,6 +199,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
     <UnitsDialog />
     <StepDialog />
     <Toasts />
+    <SpaceMouseDialog />
   </div>
 </template>
 
@@ -222,7 +234,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 .brand span {
   color: var(--accent);
 }
+.toolbar .btn {
+  flex: none;
+  white-space: nowrap;
+}
 .project {
+  flex: 0 1 auto;
+  min-width: 2rem;
   color: var(--muted);
   font-size: 0.85rem;
   margin-right: 0.5rem;
@@ -246,6 +264,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 }
 .spacer {
   flex: 1;
+}
+.sm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.sm-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+.led {
+  width: 7px;
+  height: 7px;
+  background: var(--border-strong);
+}
+.led.on {
+  background: var(--accent);
 }
 .field {
   display: flex;
@@ -284,6 +318,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 }
 .muted {
   color: var(--muted);
+}
+
+@media (max-width: 1400px) {
+  .nav-label {
+    display: none;
+  }
 }
 
 @media (max-width: 900px) {

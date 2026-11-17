@@ -38,11 +38,12 @@ import { triPages, type Rect } from '@/core/paint';
 import { DepthView } from './depth';
 import { applyNavPreset, type NavPreset } from './navigation';
 import { createDepthMaterial, createPaintMaterial, createPaletteUniform, createSlotTexture } from './paintMaterial';
+import { SelectionOutline } from './selectionOutline';
 
-const SELECTED_EMISSIVE = new Color('#1f2b0c');
-const BLACK = new Color('#000000');
 const OPEN_EDGE_COLOR = '#ff4d4d';
 const NON_MANIFOLD_COLOR = '#ffa53d';
+/** Front-right-above, like the slicers' default view. */
+const DEFAULT_VIEW = new Vector3(0.55, -1, 0.75);
 /** Layer that only paintable meshes are on (used by the depth pass). */
 const PAINT_LAYER = 1;
 
@@ -99,7 +100,7 @@ export class Viewport {
   private views = new Map<string, ViewObject>();
   private selectedId: string | null = null;
   private edgesVisible = true;
-  private preview = false;
+  private outline = new SelectionOutline();
   private raycaster = new Raycaster();
   private palette = createPaletteUniform();
   private depthMaterial = createDepthMaterial();
@@ -109,6 +110,10 @@ export class Viewport {
 
   /** Called when the user clicks (without dragging) on an object, or on empty space (null). */
   onPick: ((id: string | null) => void) | null = null;
+  /** True while a paint stroke is in progress (set by the paint tool); 3D-mouse moves wait for it. */
+  strokeActive: () => boolean = () => false;
+  /** Called when a 3D-mouse move starts (true) and stops (false). */
+  onNavMotion: ((moving: boolean) => void) | null = null;
 
   constructor(private host: HTMLElement) {
     this.renderer = new WebGLRenderer({ antialias: true });
@@ -181,12 +186,11 @@ export class Viewport {
     };
     if (openEdges.length) edges.add(edgeLines(openEdges, OPEN_EDGE_COLOR));
     if (nonManifoldEdges.length) edges.add(edgeLines(nonManifoldEdges, NON_MANIFOLD_COLOR));
-    edges.visible = this.edgesVisible && !this.preview;
+    edges.visible = this.edgesVisible;
     obj.add(edges);
 
     this.views.set(id, { mesh: obj, edges, paint: null, highlight: null, cut: null });
     this.objects.add(obj);
-    this.applySelection();
     this.requestRender();
   }
 
@@ -219,7 +223,6 @@ export class Viewport {
     });
     view.mesh.raycast = acceleratedRaycast;
     view.paint = { atlas, maps, pageOf: triPages(atlas), textures, bvh };
-    this.applySelection();
     this.requestRender();
   }
 
@@ -283,7 +286,7 @@ export class Viewport {
     }
     const mats = view.mesh.material;
     for (const m of Array.isArray(mats) ? mats : [mats]) m.visible = !cut;
-    view.edges.visible = !cut && this.edgesVisible && !this.preview;
+    view.edges.visible = !cut && this.edgesVisible;
     if (cut) {
       const T = cut.slots.length;
       const pos = new Float32Array(T * 9);
@@ -377,31 +380,24 @@ export class Viewport {
     view.paint = null;
   }
 
+  /** The selected object gets an outline drawn around it; its surface colours are untouched. */
   setSelected(id: string | null): void {
     this.selectedId = id;
-    this.applySelection();
     this.requestRender();
   }
 
-  private applySelection(): void {
-    for (const [oid, view] of this.views) {
-      const on = oid === this.selectedId && !this.preview;
-      const mats = view.mesh.material;
-      for (const m of Array.isArray(mats) ? mats : [mats]) (m as MeshStandardMaterial).emissive.copy(on ? SELECTED_EMISSIVE : BLACK);
-    }
+  private drawSelectionOutline(): void {
+    const sel = this.selectedId ? this.views.get(this.selectedId) : undefined;
+    if (!sel?.mesh.visible) return;
+    // While the export cut is shown, outline the cut mesh (the painted one is hidden).
+    const shown = (v: ViewObject): Mesh => (v.cut ? (v.cut.group.children[0] as Mesh) : v.mesh);
+    const visible = [...this.views.values()].filter((v) => v.mesh.visible).map(shown);
+    this.outline.render(this.renderer, this.camera, shown(sel), visible);
   }
 
   setEdgeHighlightsVisible(visible: boolean): void {
     this.edgesVisible = visible;
-    for (const v of this.views.values()) v.edges.visible = visible && !this.preview && !v.cut;
-    this.requestRender();
-  }
-
-  /** Print preview: palette colours only, no selection tint or edge highlights. */
-  setPreview(on: boolean): void {
-    this.preview = on;
-    this.setEdgeHighlightsVisible(this.edgesVisible);
-    this.applySelection();
+    for (const v of this.views.values()) v.edges.visible = visible && !v.cut;
     this.requestRender();
   }
 
@@ -419,6 +415,12 @@ export class Viewport {
     const hits = this.raycaster.intersectObjects(meshes, false);
     // firstHitOnly gives one hit per mesh; the nearest overall comes first after sorting.
     return hits.sort((a, b) => a.distance - b.distance)[0];
+  }
+
+  /** The point on the visible objects at the centre of the view, or null. */
+  centreHit(): Vector3 | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return this.castFrom(r.left + r.width / 2, r.top + r.height / 2, this.visibleMeshes())?.point.clone() ?? null;
   }
 
   /** Returns the id of the visible object under the given client coordinates, or null. */
@@ -606,8 +608,11 @@ export class Viewport {
     this.requestRender();
   }
 
-  /** Fits the camera to the given box, or to the visible objects, or to the plate if empty. */
-  frame(box?: Box3): void {
+  /**
+   * Fits the camera to the given box, or to the visible objects, or to the plate if empty.
+   * `from` is the direction the camera looks from (default: front-right-above).
+   */
+  frame(box?: Box3, from: Vector3 = DEFAULT_VIEW): void {
     const target = box ?? new Box3();
     if (!box) for (const m of this.visibleMeshes()) target.expandByObject(m);
     if (target.isEmpty()) {
@@ -617,13 +622,27 @@ export class Viewport {
     const sphere = target.getBoundingSphere(new Sphere());
     const fov = (this.camera.fov * Math.PI) / 180;
     const dist = sphere.radius / Math.sin(Math.min(fov, fov * this.camera.aspect) / 2);
-    // Front-right-above, like the slicers' default view.
-    const dir = new Vector3(0.55, -1, 0.75).normalize();
+    const dir = from.clone().normalize();
     this.controls.target.copy(sphere.center);
     this.camera.position.copy(sphere.center).addScaledVector(dir, dist);
     this.camera.near = Math.max(0.1, dist / 1000);
     this.camera.far = dist * 20;
     this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.requestRender();
+  }
+
+  /** Frames the visible objects from the top, front (-Y, as in the slicers) or right. */
+  viewFrom(side: 'top' | 'front' | 'right'): void {
+    // Straight down would leave "up" undefined; a hair off keeps the front at the bottom.
+    const dir = side === 'top' ? new Vector3(0, -1e-3, 1) : side === 'front' ? new Vector3(0, -1, 0) : new Vector3(1, 0, 0);
+    this.frame(undefined, dir);
+  }
+
+  /** Turns the view about the vertical axis through the orbit centre. */
+  turnView(angle: number): void {
+    const t = this.controls.target;
+    this.camera.position.sub(t).applyAxisAngle(new Vector3(0, 0, 1), angle).add(t);
     this.controls.update();
     this.requestRender();
   }
@@ -634,6 +653,7 @@ export class Viewport {
     requestAnimationFrame(() => {
       this.renderQueued = false;
       this.renderer.render(this.scene, this.camera);
+      this.drawSelectionOutline();
     });
   }
 
@@ -645,6 +665,7 @@ export class Viewport {
     this.depthTarget?.dispose();
     this.depthMaterial.dispose();
     this.ringMaterials.forEach((m) => m.dispose());
+    this.outline.dispose();
     this.scene.traverse((o) => {
       if (o instanceof Mesh || o instanceof LineSegments || o instanceof LineLoop) {
         o.geometry.dispose();

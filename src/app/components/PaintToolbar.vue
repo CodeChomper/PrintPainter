@@ -129,15 +129,6 @@ const axes = ['X', 'Y', 'Z'] as const;
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 000 12h3" /></svg>
         <span class="sr-only">Redo</span>
       </button>
-      <button
-        class="tool wide"
-        :class="{ on: paint.preview }"
-        :aria-pressed="paint.preview"
-        title="Print preview: filament colours only (P)"
-        @click="paint.preview = !paint.preview"
-      >
-        Preview
-      </button>
     </div>
   </div>
 </template>
@@ -180,9 +171,6 @@ const axes = ['X', 'Y', 'Z'] as const;
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
-}
-.tool.wide {
-  padding: 0 0.6rem;
 }
 .tog {
   min-width: 1.7rem;

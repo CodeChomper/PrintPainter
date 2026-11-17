@@ -55,7 +55,6 @@ export const usePaintStore = defineStore('paint', () => {
   /** Brush diameter in mm. */
   const size = ref(loadSize());
   const symmetry = ref<[boolean, boolean, boolean]>([false, false, false]);
-  const preview = ref(false);
   const savedFill = loadFill();
   /** Bucket fill: what stops the fill. */
   const fillMode = ref<FillMode>(savedFill.mode);
@@ -192,7 +191,6 @@ export const usePaintStore = defineStore('paint', () => {
     tool,
     size,
     symmetry,
-    preview,
     fillMode,
     fillAngle,
     lassoThrough,

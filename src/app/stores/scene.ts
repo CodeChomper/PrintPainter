@@ -506,7 +506,6 @@ export const useSceneStore = defineStore('scene', () => {
     const vp = getViewport();
     if (!vp) return;
     vp.setPalette(usePaletteStore().colors);
-    vp.setPreview(usePaintStore().preview);
     for (const o of sceneObjects.values()) {
       vp.addObject(o.id, o.mesh, o.report.openEdges, o.report.nonManifoldEdges);
       vp.setObjectTransform(o.id, UNIT_TO_MM[o.unit], o.offset);
