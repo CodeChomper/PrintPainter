@@ -64,6 +64,24 @@ describe('paintDab', () => {
     expect(sampleAt(atlas, maps, 5, 2.7)).toBe(0);
   });
 
+  it('paints a square tip with its sides along the given direction', () => {
+    const { atlas, maps, dab } = setup();
+    // Half-width 2: a 4 × 4 mm square = 1600 texels at 0.1 mm.
+    const changed = dab({ ...down(5, 5, 2, 3), square: [1, 0, 0] });
+    expect(changed).toBeGreaterThan(1600 * 0.95);
+    expect(changed).toBeLessThan(1600 * 1.05);
+    expect(sampleAt(atlas, maps, 6.8, 6.8)).toBe(3); // corner: outside a round tip
+    expect(sampleAt(atlas, maps, 7.3, 5)).toBe(0);
+    expect(sampleAt(atlas, maps, 5, 2.7)).toBe(0);
+  });
+
+  it('turns a square tip with its side direction (which need not be across the axis)', () => {
+    const { atlas, maps, dab } = setup();
+    dab({ ...down(5, 5, 2, 3), square: [1, 1, 0.7] }); // 45°, with some of the brush axis in it
+    expect(sampleAt(atlas, maps, 7.6, 5)).toBe(3); // the diamond reaches 2.83 along x
+    expect(sampleAt(atlas, maps, 6.8, 6.8)).toBe(0);
+  });
+
   it('ignores faces turned away from the brush', () => {
     const { dab } = setup();
     expect(dab({ origin: [5, 5, -100], dir: [0, 0, 1], radius: 3, value: 2 })).toBe(0);

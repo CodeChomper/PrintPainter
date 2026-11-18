@@ -10,11 +10,14 @@ import type { DepthView } from './depth';
 import type { PaintBinding, PaintHit, Viewport } from './Viewport';
 
 export type PaintMode = 'brush' | 'eraser' | 'fill' | 'line' | 'lasso' | null;
+export type BrushShape = 'round' | 'square';
 
 export interface PaintSettings {
   mode: PaintMode;
-  /** Brush radius in mm (brush, eraser, line). */
+  /** Brush radius in mm (brush, eraser, line); half the side of a square brush. */
   radius: number;
+  /** Brush tip (brush, eraser, line). A square lines up with the screen, or with the line. */
+  shape: BrushShape;
   /** Slot painted (1..16). */
   slot: number;
   /** Mirror across the object's centre on X, Y, Z. */
@@ -59,6 +62,8 @@ interface Stroke {
   recorders: Map<string, Painting | null>;
   /** Brush: last dab position. Line: start. */
   last: { x: number; y: number };
+  /** Square brush: world direction of one side (null: round). */
+  side: Vector3 | null;
   /** Lasso outline (client coordinates). */
   points: { x: number; y: number }[];
   pointerId: number;
@@ -88,6 +93,7 @@ export class PaintTool {
   settings: PaintSettings = {
     mode: null,
     radius: 2,
+    shape: 'round',
     slot: 2,
     symmetry: [false, false, false],
     slotColor: '#ffffff',
@@ -197,6 +203,24 @@ export class PaintTool {
     return erase ? '#ffffff' : this.settings.slotColor;
   }
 
+  private showRing(point: Vector3, erase: boolean, side: Vector3 | null): void {
+    this.vp.showBrushRing(point, this.settings.radius, this.ringColor(erase), side);
+  }
+
+  /**
+   * Square brush: the world direction of one side, level with the screen, or along a
+   * screen movement (a line) when given. Null for a round brush.
+   */
+  private squareSide(along?: { x: number; y: number }): Vector3 | null {
+    if (this.settings.shape !== 'square') return null;
+    const q = this.vp.camera.quaternion;
+    const right = new Vector3(1, 0, 0).applyQuaternion(q);
+    if (!along || Math.hypot(along.x, along.y) < 1) return right;
+    const up = new Vector3(0, 1, 0).applyQuaternion(q);
+    // Screen y points down.
+    return right.multiplyScalar(along.x).addScaledVector(up, -along.y).normalize();
+  }
+
   private onDown(e: PointerEvent): void {
     const mode = this.settings.mode;
     if (!mode || e.button !== 0 || e.altKey || this.stroke) return;
@@ -239,6 +263,7 @@ export class PaintTool {
       depth: this.vp.captureDepth(),
       recorders: new Map(),
       last: { x: e.clientX, y: e.clientY },
+      side: kind === 'brush' ? this.squareSide() : null,
       points: [{ x: e.clientX, y: e.clientY }],
       pointerId: e.pointerId,
     };
@@ -255,7 +280,7 @@ export class PaintTool {
     if (e.pointerId !== s.pointerId) return;
     if (s.kind === 'line') {
       const hit = this.vp.paintHit(e.clientX, e.clientY);
-      if (hit) this.vp.showBrushRing(hit.point, this.settings.radius, this.ringColor(s.erase));
+      if (hit) this.showRing(hit.point, s.erase, this.squareSide({ x: e.clientX - s.last.x, y: e.clientY - s.last.y }));
       else this.vp.hideBrushRing();
       this.drawOverlay([s.last, { x: e.clientX, y: e.clientY }], false);
       return;
@@ -293,7 +318,7 @@ export class PaintTool {
       return;
     }
     el.style.cursor = 'none';
-    this.vp.showBrushRing(hit.point, this.settings.radius, this.ringColor(erase));
+    this.showRing(hit.point, erase, this.squareSide());
   }
 
   private clearHover(): void {
@@ -398,7 +423,7 @@ export class PaintTool {
     const radiusPx = hit ? this.settings.radius / this.vp.pixelSizeAt(hit.point) : 8;
     const step = Math.max(1, radiusPx * SPACING);
     if (dist < step) {
-      if (hit) this.vp.showBrushRing(hit.point, this.settings.radius, this.ringColor(s.erase));
+      if (hit) this.showRing(hit.point, s.erase, s.side);
       return;
     }
     const n = Math.ceil(dist / step);
@@ -428,7 +453,7 @@ export class PaintTool {
     const s = this.stroke!;
     const hit = this.vp.paintHit(x, y);
     if (!hit) return;
-    this.vp.showBrushRing(hit.point, this.settings.radius, this.ringColor(s.erase));
+    this.showRing(hit.point, s.erase, s.side);
     const binding = this.vp.paintBinding(hit.id);
     const mesh = this.vp.objectMesh(hit.id);
     if (!binding || !mesh) return;
@@ -443,6 +468,7 @@ export class PaintTool {
     const origin = this.toLocal(mesh, this.vp.camera.position);
     const d: Vec3 = [dir.x, dir.y, dir.z];
     const radius = this.settings.radius / scale;
+    const side = s.side; // a direction: the same in local and world (uniform scale, no rotation)
     const depth = s.depth;
     const visible = (px: number, py: number, pz: number) =>
       depth.visible(px * scale + off.x, py * scale + off.y, pz * scale + off.z);
@@ -456,6 +482,7 @@ export class PaintTool {
         origin: mirror(origin),
         dir: [d[0] * flip[0], d[1] * flip[1], d[2] * flip[2]],
         radius,
+        square: side ? [side.x * flip[0], side.y * flip[1], side.z * flip[2]] : undefined,
         value,
         // A mirrored texel is visible if its mirror image (on the side being looked at) is.
         visible: mirrored
@@ -468,11 +495,11 @@ export class PaintTool {
     }
   }
 
-  /** Triangles whose bounds come within the brush radius of the brush axis. */
+  /** Triangles whose bounds come within the brush's reach of the brush axis. */
   private gather(binding: PaintBinding, dab: Dab): number {
     const [ox, oy, oz] = dab.origin;
     const [dx, dy, dz] = dab.dir;
-    const r = dab.radius;
+    const r = dab.square ? dab.radius * Math.SQRT2 : dab.radius;
     let n = 0;
     const bvh = binding.bvh;
     bvh.shapecast({
@@ -608,6 +635,8 @@ export class PaintTool {
     const s = this.stroke;
     if (!s || e.pointerId !== s.pointerId) return;
     if (s.kind === 'line') {
+      // A square tip runs along the line, so the line has straight sides and square ends.
+      s.side = this.squareSide({ x: e.clientX - s.last.x, y: e.clientY - s.last.y });
       this.dabAt(s.last.x, s.last.y);
       this.strokeTo(e.clientX, e.clientY);
     } else if (s.kind === 'lasso') {

@@ -2,16 +2,20 @@ import { defineStore } from 'pinia';
 import { ref, shallowRef, watch } from 'vue';
 import { History, type HistoryEntry } from '@/core/history';
 import { clearMaps, PaintRecorder, remapEdit, swapTiles } from '@/core/paint';
-import type { StrokeEdit } from '@/engine/PaintTool';
+import type { BrushShape, StrokeEdit } from '@/engine/PaintTool';
 import { sceneObjects, touchPaint } from '../document';
 import { isMaskTarget, useLayersStore } from './layers';
 
 import type { FillMode } from '@/core/fill';
 
 export type Tool = 'select' | 'brush' | 'eraser' | 'fill' | 'line' | 'lasso';
-export type { FillMode };
+export type { BrushShape, FillMode };
+/** Tools with a brush tip. */
+export type TipTool = 'brush' | 'eraser' | 'line';
+export const isTipTool = (t: Tool): t is TipTool => t === 'brush' || t === 'eraser' || t === 'line';
 
 const SIZE_KEY = 'pp.brushSize';
+const SHAPE_KEY = 'pp.brushShape';
 const FILL_KEY = 'pp.fill';
 export const FILL_ANGLE_MAX = 90;
 
@@ -39,6 +43,17 @@ function loadFill(): { mode: FillMode; angle: number; through: boolean } {
 export const BRUSH_MIN = 0.2;
 export const BRUSH_MAX = 60;
 
+function loadShapes(): Record<TipTool, BrushShape> {
+  const d: Record<TipTool, BrushShape> = { brush: 'round', eraser: 'round', line: 'round' };
+  try {
+    const v = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? 'null') as Partial<Record<TipTool, unknown>> | null;
+    for (const k of Object.keys(d) as TipTool[]) if (v?.[k] === 'round' || v?.[k] === 'square') d[k] = v[k];
+  } catch {
+    /* ignore */
+  }
+  return d;
+}
+
 function loadSize(): number {
   try {
     const v = Number(localStorage.getItem(SIZE_KEY));
@@ -54,6 +69,8 @@ export const usePaintStore = defineStore('paint', () => {
   const tool = ref<Tool>('select');
   /** Brush diameter in mm. */
   const size = ref(loadSize());
+  /** Brush tip per tool (each remembers its own). */
+  const shapes = ref(loadShapes());
   const symmetry = ref<[boolean, boolean, boolean]>([false, false, false]);
   const savedFill = loadFill();
   /** Bucket fill: what stops the fill. */
@@ -85,6 +102,23 @@ export const usePaintStore = defineStore('paint', () => {
       /* ignore */
     }
   });
+
+  watch(
+    shapes,
+    (v) => {
+      try {
+        localStorage.setItem(SHAPE_KEY, JSON.stringify(v));
+      } catch {
+        /* ignore */
+      }
+    },
+    { deep: true },
+  );
+
+  /** A tool's brush tip ('round' for tools without one). */
+  function shapeOf(t: Tool): BrushShape {
+    return isTipTool(t) ? shapes.value[t] : 'round';
+  }
 
   watch([fillMode, fillAngle, lassoThrough], ([mode, angle, through]) => {
     try {
@@ -190,6 +224,8 @@ export const usePaintStore = defineStore('paint', () => {
   return {
     tool,
     size,
+    shapes,
+    shapeOf,
     symmetry,
     fillMode,
     fillAngle,

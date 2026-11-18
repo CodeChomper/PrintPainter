@@ -35,6 +35,7 @@ function pushToolSettings() {
   tool?.update({
     mode: paint.tool === 'select' ? null : paint.tool,
     radius: paint.size / 2,
+    shape: paint.shapeOf(paint.tool),
     slot: palette.active,
     slotColor: maskTargeted() ? '#d8d8d8' : palette.activeSlot.color,
     symmetry: [...paint.symmetry],
@@ -84,7 +85,7 @@ onMounted(() => {
 
 watch(() => ui.navPreset, (p) => viewport?.setNavPreset(p));
 watch(
-  () => [paint.tool, paint.size, paint.symmetry, palette.active, palette.activeSlot.color, paint.fillMode, paint.fillAngle, paint.lassoThrough, maskTargeted()],
+  () => [paint.tool, paint.size, paint.shapes, paint.symmetry, palette.active, palette.activeSlot.color, paint.fillMode, paint.fillAngle, paint.lassoThrough, maskTargeted()],
   pushToolSettings,
   { deep: true },
 );

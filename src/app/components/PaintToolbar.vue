@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { BRUSH_MAX, BRUSH_MIN, FILL_ANGLE_MAX, usePaintStore, type FillMode, type Tool } from '../stores/paint';
+import { BRUSH_MAX, BRUSH_MIN, FILL_ANGLE_MAX, isTipTool, usePaintStore, type BrushShape, type FillMode, type Tool } from '../stores/paint';
 import { useSceneStore } from '../stores/scene';
 import { usePaletteStore } from '../stores/palette';
 
@@ -34,7 +34,15 @@ const slider = computed({
 });
 
 const painting = computed(() => paint.tool !== 'select');
-const sized = computed(() => paint.tool === 'brush' || paint.tool === 'eraser' || paint.tool === 'line');
+const sized = computed(() => isTipTool(paint.tool));
+
+const shapes: { id: BrushShape; label: string; icon: string }[] = [
+  { id: 'round', label: 'Round', icon: 'M12 5a7 7 0 110 14a7 7 0 110-14z' },
+  { id: 'square', label: 'Square', icon: 'M5.5 5.5h13v13h-13z' },
+];
+function setShape(s: BrushShape) {
+  if (isTipTool(paint.tool)) paint.shapes[paint.tool] = s;
+}
 const axes = ['X', 'Y', 'Z'] as const;
 </script>
 
@@ -88,6 +96,21 @@ const axes = ['X', 'Y', 'Z'] as const;
         <input v-model="paint.lassoThrough" type="checkbox" name="lassoThrough" />
         <span>Paint hidden surfaces too</span>
       </label>
+      <span v-if="sized" class="sym" role="radiogroup" aria-label="Brush tip">
+        <button
+          v-for="s in shapes"
+          :key="s.id"
+          class="tog"
+          role="radio"
+          :class="{ on: paint.shapeOf(paint.tool) === s.id }"
+          :aria-checked="paint.shapeOf(paint.tool) === s.id"
+          :title="`${s.label} tip`"
+          @click="setShape(s.id)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="s.icon" /></svg>
+          <span class="sr-only">{{ s.label }}</span>
+        </button>
+      </span>
       <label v-if="sized" class="size" :title="paint.tool === 'line' ? 'Line width ([ and ] to change)' : 'Brush size ([ and ] to change)'">
         <span class="muted">Size</span>
         <input v-model.number="slider" type="range" name="brushSize" :min="0" :max="STEPS" step="1" aria-label="Brush size" />

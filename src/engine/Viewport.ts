@@ -12,6 +12,7 @@ import {
   LineBasicMaterial,
   LineLoop,
   LineSegments,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -106,6 +107,9 @@ export class Viewport {
   private depthMaterial = createDepthMaterial();
   private depthTarget: WebGLRenderTarget | null = null;
   private ringMaterials = new Map<string, LineBasicMaterial>();
+  /** Brush outlines: a unit circle and a square of half-width 1. */
+  private circleGeometry = loopGeometry(Array.from({ length: 64 }, (_, i) => [Math.cos((i / 64) * Math.PI * 2), Math.sin((i / 64) * Math.PI * 2)]));
+  private squareGeometry = loopGeometry([[-1, -1], [1, -1], [1, 1], [-1, 1]]);
   private ring: Group;
 
   /** Called when the user clicks (without dragging) on an object, or on empty space (null). */
@@ -250,7 +254,10 @@ export class Viewport {
       const { width: W, height: H } = paint.atlas.pages[i]!;
       if (!r || (r.x1 - r.x0) * (r.y1 - r.y0) > (W * H) / 3) {
         tex.clearUpdateRanges(); // whole texture
-      } else {
+        // Until it is uploaded, adding a range would shrink the upload to that range.
+        wholeUpload.add(tex);
+        tex.onUpdate = () => wholeUpload.delete(tex);
+      } else if (!wholeUpload.has(tex)) {
         // three.js counts update ranges in RGBA components, whatever the format.
         for (let y = r.y0; y < r.y1; y++) tex.addUpdateRange((y * W + r.x0) * 4, (r.x1 - r.x0) * 4);
       }
@@ -543,12 +550,23 @@ export class Viewport {
     return (2 * d * Math.tan((this.camera.fov * Math.PI) / 360)) / Math.max(1, this.host.clientHeight);
   }
 
-  /** Shows the brush outline at a surface point, facing along the brush axis. */
-  showBrushRing(point: Vector3, radiusMm: number, color: string): void {
+  /**
+   * Shows the brush outline at a surface point, facing along the brush axis: a circle,
+   * or with `squareSide` (the world direction of one side) a square of half-width `radiusMm`.
+   */
+  showBrushRing(point: Vector3, radiusMm: number, color: string, squareSide: Vector3 | null = null): void {
     const dir = point.clone().sub(this.camera.position).normalize();
     this.ring.position.copy(point);
-    this.ring.quaternion.copy(new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), dir));
+    const x = squareSide ? squareSide.clone().addScaledVector(dir, -squareSide.dot(dir)) : null;
+    if (x && x.lengthSq() > 1e-12) {
+      x.normalize();
+      this.ring.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(x, new Vector3().crossVectors(dir, x), dir));
+    } else {
+      this.ring.quaternion.copy(new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), dir));
+    }
     this.ring.scale.setScalar(radiusMm);
+    const geom = squareSide ? this.squareGeometry : this.circleGeometry;
+    for (const l of this.ring.children as LineLoop[]) l.geometry = geom;
     (this.ring.children[1] as LineLoop).material = this.ringMaterial(color);
     this.ring.visible = true;
     this.requestRender();
@@ -570,12 +588,7 @@ export class Viewport {
   }
 
   private buildRing(): Group {
-    const pts: number[] = [];
-    for (let i = 0; i < 64; i++) {
-      const a = (i / 64) * Math.PI * 2;
-      pts.push(Math.cos(a), Math.sin(a), 0);
-    }
-    const geom = new BufferGeometry().setAttribute('position', new Float32BufferAttribute(pts, 3));
+    const geom = this.circleGeometry;
     // A dark outline just outside a coloured ring, both drawn over everything.
     const outline = new LineLoop(geom, new LineBasicMaterial({ color: '#000000', depthTest: false, transparent: true, opacity: 0.6 }));
     outline.scale.setScalar(1.04);
@@ -665,6 +678,8 @@ export class Viewport {
     this.depthTarget?.dispose();
     this.depthMaterial.dispose();
     this.ringMaterials.forEach((m) => m.dispose());
+    this.circleGeometry.dispose();
+    this.squareGeometry.dispose();
     this.outline.dispose();
     this.scene.traverse((o) => {
       if (o instanceof Mesh || o instanceof LineSegments || o instanceof LineLoop) {
@@ -737,6 +752,14 @@ export class Viewport {
 
     this.plate.add(surface, grid, outline, axes);
   }
+}
+
+/** Paint textures waiting for a whole-texture upload. */
+const wholeUpload = new WeakSet<DataTexture>();
+
+/** A closed outline in the z = 0 plane. */
+function loopGeometry(points: number[][]): BufferGeometry {
+  return new BufferGeometry().setAttribute('position', new Float32BufferAttribute(points.flatMap(([x, y]) => [x!, y!, 0]), 3));
 }
 
 function disposeMaterial(m: Material | Material[]): void {

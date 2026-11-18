@@ -6,7 +6,8 @@
 // that changed.
 //
 // A dab paints every texel whose surface point lies within `radius` of the brush axis
-// (a ray from the camera through the cursor hit), faces the camera and passes the
+// (a ray from the camera through the cursor hit), or for a square brush within
+// `radius` of it along each of the square's two axes, faces the camera and passes the
 // caller's visibility test (the viewport checks its depth buffer). Texels are
 // rasterized conservatively: any texel within RASTER_REACH of a triangle in UV space
 // is painted using the nearest surface point, so the GPU never samples an unpainted
@@ -36,6 +37,11 @@ export interface Dab {
   origin: Vec3;
   dir: Vec3;
   radius: number;
+  /**
+   * Square brush: a direction across the axis for one side of the square (it need not
+   * be exactly perpendicular to `dir`). The square's half-width is `radius`.
+   */
+  square?: Vec3;
   /** Slot to write (0 erases). */
   value: number;
   /** Extra per-texel test (occlusion); position in source units. */
@@ -177,6 +183,27 @@ export function paintDab(
   const [ox, oy, oz] = dab.origin;
   const [dx, dy, dz] = dab.dir;
   const r = dab.radius, r2 = r * r;
+  // Square: unit axes u, v across the brush axis (u = the given side, made perpendicular).
+  let square = false, ux = 0, uy = 0, uz = 0, vx = 0, vy = 0, vz = 0;
+  if (dab.square) {
+    const [sx, sy, sz] = dab.square;
+    const a = sx * dx + sy * dy + sz * dz;
+    ux = sx - a * dx;
+    uy = sy - a * dy;
+    uz = sz - a * dz;
+    const l = Math.hypot(ux, uy, uz);
+    if (l > 1e-9) {
+      square = true;
+      ux /= l;
+      uy /= l;
+      uz /= l;
+      vx = dy * uz - dz * uy;
+      vy = dz * ux - dx * uz;
+      vz = dx * uy - dy * ux;
+    }
+  }
+  /** Farthest the brush reaches from its axis (a square's corners). */
+  const reach = square ? r * Math.SQRT2 : r;
   const value = dab.value;
   const visible = dab.visible;
   const reach2 = RASTER_REACH * RASTER_REACH;
@@ -210,7 +237,7 @@ export function paintDab(
           (p2x - cx) ** 2 + (p2y - cy) ** 2 + (p2z - cz) ** 2,
         ),
       );
-      if (Math.hypot(cx, cy, cz) > r + R) continue;
+      if (Math.hypot(cx, cy, cz) > reach + R) continue;
     }
 
     const ua = U[ia * 2]!, va = U[ia * 2 + 1]!;
@@ -249,7 +276,9 @@ export function paintDab(
         const pz = paz + lb * e1z + lc * e2z;
         const qx = px - ox, qy = py - oy, qz = pz - oz;
         const along = qx * dx + qy * dy + qz * dz;
-        if (qx * qx + qy * qy + qz * qz - along * along > r2) continue;
+        if (square) {
+          if (Math.abs(qx * ux + qy * uy + qz * uz) > r || Math.abs(qx * vx + qy * vy + qz * vz) > r) continue;
+        } else if (qx * qx + qy * qy + qz * qz - along * along > r2) continue;
         const idx = y * W + x;
         if (map[idx] === value) continue;
         if (visible && !visible(px, py, pz)) continue;
